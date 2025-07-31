@@ -1,0 +1,24 @@
+This repository contains source code for MRSH-v2.
+
+If you are using this code in connection with academic publication, we would
+be grateful if you would cite the following related works:
+
+
+The paper introducing the original MRSH-v2 algorithm:
+   Breitinger, F. & Baier, H., 2012. Similarity preserving hashing: Eligible
+   properties and a new algorithm mrsh-v2. In International Conference on
+   Digital Forensics and Cyber Crime. Springer, pp. 167–182.
+
+BibTex:
+
+@inproceedings{10.1007/978-3-642-39891-9_11,
+	Abstract = {Hash functions are a widespread class of functions in computer science and used in several applications, e.g. in computer forensics to identify known files. One basic property of cryptographic Hash Functions is the avalanche effect that causes a significantly different output if an input is changed slightly. As some applications also need to identify similar files (e.g. spam/virus detection) this raised the need for Similarity Preserving Hashing. In recent years, several approaches came up, all with different namings, properties, strengths and weaknesses which is due to a missing definition.},
+	Address = {Berlin, Heidelberg},
+	Author = {Breitinger, Frank and Baier, Harald},
+	Booktitle = {Digital Forensics and Cyber Crime},
+	Editor = {Rogers, Marcus and Seigfried-Spellar, Kathryn C.},
+	Isbn = {978-3-642-39891-9},
+	Pages = {167--182},
+	Publisher = {Springer Berlin Heidelberg},
+	Title = {Similarity Preserving Hashing: Eligible Properties and a New Algorithm MRSH-v2},
+	Year = {2013}}
