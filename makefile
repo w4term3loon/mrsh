@@ -1,25 +1,28 @@
-PROJECT_SRC = ./src/main.c ./src/util.c src/hashing.c src/bloomfilter.c src/fingerprint.c src/fingerprintList.c src/helper.c
-
-
 NAME=mrsh
+SOURCE=src/util.c src/hashing.c src/bloomfilter.c src/fingerprint.c src/fingerprintList.c src/helper.c
+HEADER=header/util.h header/hashing.h header/bloomfilter.h header/fingerprint.h header/fingerprintList.h header/helper.h
+
+CMD_TARGET=src/main.c
 
 all: debug
 
-debug: ${PROJECT_SRC} ${PROJECT_HDR}
-	gcc -w -ggdb -std=c99 -D_BSD_SOURCE -lcrypto -o ${NAME} ${PROJECT_SRC} -Dnetwork -lm
+mrsh: ${SOURCE} ${HEADER} ${CMD_TARGET}
+	gcc -w -std=c99 -O3 -D_BSD_SOURCE -lcrypto -o ${NAME} ${CMD_TARGET} ${SOURCE} -lm
 
-mrsh: ${PROJECT_SRC} ${PROJECT_HDR}
-	gcc -w -std=c99 -O3 -D_BSD_SOURCE -lcrypto -o ${NAME} ${PROJECT_SRC} -lm
+debug: ${SOURCE} ${HEADER} ${CMD_TARGET}
+	gcc -w -ggdb -std=c99 -O0 -D_BSD_SOURCE -lcrypto -o ${NAME} ${CMD_TARGET} ${SOURCE} -lm
 
-net: ${PROJECT_SRC} ${PROJECT_HDR}
-	gcc -w -std=c99 -O3 -D_BSD_SOURCE -lcrypto -o ${NAME} ${PROJECT_SRC} -Dnetwork -lm
+net: ${SOURCE} ${HEADER} ${CMD_TARGET}
+	gcc -w -std=c99 -O3 -D_BSD_SOURCE -lcrypto -o ${NAME} ${CMD_TARGET} ${SOURCE} -Dnetwork -lm
 
-#pg for profiler, gprof. 
+lib: ${SOURCE} ${HEADER}
+	gcc -w -Iheader -std=c99 -O3 -fPIC -shared -D_BSD_SOURCE -fvisibility=default -lcrypto -o bindings/mrsh/_native.so ${SOURCE} bindings/mrsh/mrsh_wrapper.c -lm
 
-clean :  
-	rm -f mrsh *.o 
+# pg for profiler, gprof.
 
-#for DT_DIR feature to work, need to have the _BSD_SOURCE  feature test macro defined. THese are not standard, and GCC does not define the macro when compiling for C99
-# -lm: -l means link a library and -m means a math library. Without this option 
+clean:
+	rm -f mrsh *.o
+
+# for DT_DIR feature to work, need to have the _BSD_SOURCE  feature test macro defined. These are not standard, and GCC does not define the macro when compiling for C99.
 
 
