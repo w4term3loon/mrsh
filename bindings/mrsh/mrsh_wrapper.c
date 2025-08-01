@@ -146,6 +146,7 @@ init_fingerprint_for_bytes(unsigned char *byte_buffer, unsigned long bytes_size)
 
   // use existing field
   // TODO: fix
+  strcpy(fp->file_name, "n/a\0");
   fp->filesize = bytes_size;
 
   hashBytesToFingerprint(fp, byte_buffer, bytes_size);
@@ -158,4 +159,50 @@ addBytesToFingerprintList(FINGERPRINT_LIST *fpl, unsigned char *byte_buffer,
   FINGERPRINT *fp = init_fingerprint_for_bytes(byte_buffer, bytes_size);
   add_new_fingerprint(fpl, fp);
   return;
+}
+
+void
+get_fingerprint(FINGERPRINT *fp, char *buffer, size_t size) {
+  /* FORMAT: filename:filesize:number of filters:blocks in last filter*/
+  int offset = snprintf(buffer, size, "%s:%d:%d:%d:", fp->file_name, fp->filesize,
+                        fp->amount_of_BF + 1, fp->bf_list_last_element->amount_of_blocks);
+
+  BLOOMFILTER *bf = fp->bf_list;
+  while (bf != NULL) {
+    // Print each Bloom filter as a 2-digit-hex value
+    for (int j = 0; j < FILTERSIZE; j++)
+      offset += snprintf(buffer + offset, size - offset, "%02X", bf->array[j]);
+
+    // move to next Bloom filter
+    bf = bf->next;
+  }
+}
+
+void
+get_fingerprintList(FINGERPRINT_LIST *fpl, char *buffer, size_t size) {
+  FINGERPRINT *tmp = fpl->list;
+  int offset = 0;
+
+  char temp[1024]; // temporary buffer for one fingerprint
+
+  while (tmp != NULL && offset < size - 1) {
+    get_fingerprint(tmp, temp, sizeof(temp));
+
+    int len = snprintf(buffer + offset, size - offset, "%s", temp);
+
+    if (len < 0 || len >= (int)(size - offset)) {
+      break; // would overflow, stop writing
+    }
+
+    offset += len;
+
+    // add new line only between elements
+    if (tmp->next != NULL && offset < size - 1) {
+      buffer[offset++] = '\n';
+    }
+
+    tmp = tmp->next;
+  }
+
+  buffer[offset < size ? offset : size - 1] = '\0'; // safe null-termination
 }
