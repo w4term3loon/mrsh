@@ -1,5 +1,4 @@
 import os
-import sys
 import ctypes
 
 lib_path = os.path.join(os.path.dirname(__file__), "_native.so")
@@ -30,8 +29,8 @@ class FingerprintList(ctypes.Structure):
 lib.init_empty_fingerprintList.restype = ctypes.POINTER(FingerprintList)
 lib.fingerprintList_destroy.argtypes = [ctypes.POINTER(FingerprintList)];
 
-lib.addPathToFingerprintList.argtypes = [ctypes.POINTER(FingerprintList), ctypes.c_char_p]
-lib.addBytesToFingerprintList.argtypes = [ctypes.POINTER(FingerprintList), ctypes.c_char_p, ctypes.c_ulong]
+lib.addPathToFingerprintList.argtypes = [ctypes.POINTER(FingerprintList), ctypes.c_char_p, ctypes.c_char_p]
+lib.addBytesToFingerprintList.argtypes = [ctypes.POINTER(FingerprintList), ctypes.c_char_p, ctypes.c_ulong, ctypes.c_char_p]
 
 lib.get_fingerprintList.argtypes = [ctypes.POINTER(FingerprintList), ctypes.c_char_p, ctypes.c_long]
 
@@ -42,14 +41,29 @@ class _MRSH_fpl:
     def __del__(self):
         lib.fingerprintList_destroy(self.fpl)
 
-    def __call__(self, data):
-        if isinstance(data, str):
-            lib.addPathToFingerprintList(self.fpl, data.encode())
-        elif isinstance(data, bytes):
-            lib.addBytesToFingerprintList(self.fpl, data, len(data))
-        elif isinstance(data, list):
-            for elem in data:
-                self.__call__(elem)
+    def __call__(self):
+        pass
+
+    def add(self, elem):
+        if isinstance(elem, str):
+            lib.addPathToFingerprintList(self.fpl, elem.encode(), None)
+
+        elif isinstance(elem, bytes):
+            na_label = ctypes.c_char_p("n/a".encode("utf-8"))
+            lib.addBytesToFingerprintList(self.fpl, elem, len(elem), na_label)
+
+        elif isinstance(elem, tuple):
+            data = elem[0]
+            label = ctypes.c_char_p(elem[1].encode("utf-8"))
+            if isinstance(data, str):
+                lib.addPathToFingerprintList(self.fpl, data.encode(), label)
+
+            if isinstance(data, bytes):
+                lib.addBytesToFingerprintList(self.fpl, data, len(data), label)
+
+        elif isinstance(elem, list):
+            for e in elem:
+                self.add(e)
         else:
             raise TypeError("Unsupported input type")
         return self
@@ -60,7 +74,7 @@ class _MRSH_fpl:
         lib.get_fingerprintList(self.fpl, buf, len(buf))
         return buf.value.decode()
 
-    def compare(self):
+    def compare(self, threshold=None):
         results = []
         fpl = ctypes.cast(self.fpl, ctypes.POINTER(FingerprintList)).contents
 
@@ -71,17 +85,20 @@ class _MRSH_fpl:
                 score = lib.fingerprint_compare(tmp1, tmp2)
                 name1 = tmp1.contents.file_name.decode()
                 name2 = tmp2.contents.file_name.decode()
-                results.append((name1, name2, score))
+
+                if threshold is None:
+                    results.append((name1, name2, score))
+                elif threshold <= score:
+                    results.append((name1, name2, score))
+
                 tmp2 = tmp2.contents.next
             tmp1 = tmp1.contents.next
 
         return results
 
-class _MRSHmodule:
-    def __call__(self, data=None) -> _MRSH_fpl:
-        obj = _MRSH_fpl()
-        if data is not None:
-            obj(data)
-        return obj
+def new(data=None) -> _MRSH_fpl:
+    obj = _MRSH_fpl()
+    if data is not None:
+        obj.add(data)
+    return obj
 
-sys.modules[__name__] = _MRSHmodule() # type: ignore

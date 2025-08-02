@@ -1,3 +1,10 @@
+/*
+ * Partially copied from the original source.
+ * Author: Frank Breitinger
+ * Created on 28. April 2013, 19:15
+ * Modified by w4term3loon.
+ */
+
 #include <dirent.h>
 #include <stdlib.h>
 #include <string.h>
@@ -40,15 +47,8 @@ is_file(const char *path);
 bool
 is_dir(const char *path);
 
-/*
- * adds a path to a fingerprints list. may be recursive depending on the parameters
- * copied from:
- * File:   main.c
- * Author: Frank Breitinger
- * Created on 28. April 2013, 19:15
- */
 void
-addPathToFingerprintList(FINGERPRINT_LIST *fpl, char *filename) {
+addPathToFingerprintList(FINGERPRINT_LIST *fpl, char *filename, const char* label) {
   DIR *dir;
   struct dirent *ent;
   const int max_path_length = 1024;
@@ -68,6 +68,13 @@ addPathToFingerprintList(FINGERPRINT_LIST *fpl, char *filename) {
       if (is_file(ent->d_name)) {
         FILE *file = getFileHandle(ent->d_name);
         FINGERPRINT *fp = init_fingerprint_for_file(file, ent->d_name);
+
+        // overwrite
+        // TODO: potentially move
+        if (label != NULL) {
+          strcpy(fp->file_name, label);
+        }
+
         add_new_fingerprint(fpl, fp);
       }
 
@@ -75,7 +82,7 @@ addPathToFingerprintList(FINGERPRINT_LIST *fpl, char *filename) {
       else if (is_dir(ent->d_name) && mode->recursive) {
         if (strcmp(ent->d_name, ".") == 0 || strcmp(ent->d_name, "..") == 0)
           continue;
-        addPathToFingerprintList(fpl, ent->d_name);
+        addPathToFingerprintList(fpl, ent->d_name, label);
       }
     }
     chdir(cur_dir);
@@ -86,6 +93,13 @@ addPathToFingerprintList(FINGERPRINT_LIST *fpl, char *filename) {
   else if (is_file(filename)) {
     FILE *file = getFileHandle(filename);
     FINGERPRINT *fp = init_fingerprint_for_file(file, filename);
+
+    // overwrite
+    // TODO: potentially move
+    if (label != NULL) {
+      strcpy(fp->file_name, label);
+    }
+
     add_new_fingerprint(fpl, fp);
   }
 
@@ -141,12 +155,12 @@ hashBytesToFingerprint(FINGERPRINT *fingerprint, unsigned char *byte_buffer,
 }
 
 FINGERPRINT *
-init_fingerprint_for_bytes(unsigned char *byte_buffer, unsigned long bytes_size) {
+init_fingerprint_for_bytes(unsigned char *byte_buffer, unsigned long bytes_size, const char *label) {
   FINGERPRINT *fp = init_empty_fingerprint();
 
   // use existing field
   // TODO: fix
-  strcpy(fp->file_name, "n/a\0");
+  strcpy(fp->file_name, label);
   fp->filesize = bytes_size;
 
   hashBytesToFingerprint(fp, byte_buffer, bytes_size);
@@ -155,8 +169,8 @@ init_fingerprint_for_bytes(unsigned char *byte_buffer, unsigned long bytes_size)
 
 void
 addBytesToFingerprintList(FINGERPRINT_LIST *fpl, unsigned char *byte_buffer,
-                          unsigned long bytes_size) {
-  FINGERPRINT *fp = init_fingerprint_for_bytes(byte_buffer, bytes_size);
+                          unsigned long bytes_size, const char *label) {
+  FINGERPRINT *fp = init_fingerprint_for_bytes(byte_buffer, bytes_size, label);
   add_new_fingerprint(fpl, fp);
   return;
 }
