@@ -2,7 +2,8 @@ import os
 import ctypes
 
 from collections import namedtuple
-Match = namedtuple('Match', ['file1', 'file2', 'score'])
+Match = namedtuple('Match', ['hash1', 'hash2', 'score'])
+Meta = namedtuple('Meta', ['name', 'size', 'filters'])
 
 lib_path = os.path.join(os.path.dirname(__file__), "_native.so")
 lib = ctypes.CDLL(lib_path)
@@ -19,8 +20,19 @@ Fingerprint._fields_ = [
         ("filesize", ctypes.c_uint32),
     ]
 
-lib.fingerprint_compare.argtypes = [ctypes.POINTER(Fingerprint), ctypes.POINTER(Fingerprint)]
-lib.fingerprint_compare.restype = ctypes.c_uint8
+lib.fp_init.restype = ctypes.POINTER(Fingerprint)
+lib.fp_destroy.argtypes = [ctypes.POINTER(Fingerprint)]
+
+lib.fp_add_file.restype = ctypes.c_int32
+lib.fp_add_file.argtypes = [ctypes.POINTER(Fingerprint), ctypes.c_char_p, ctypes.c_char_p]
+
+lib.fp_add_bytes.restype = ctypes.c_int32
+lib.fp_add_bytes.argtypes = [ctypes.POINTER(Fingerprint), ctypes.c_char_p, ctypes.c_ulong, ctypes.c_char_p]
+
+lib.fp_fp_compare.restype = ctypes.c_uint8
+lib.fp_fp_compare.argtypes = [ctypes.POINTER(Fingerprint), ctypes.POINTER(Fingerprint)]
+
+lib.fp_get.argtypes = [ctypes.POINTER(Fingerprint), ctypes.c_char_p, ctypes.c_long]
 
 class FingerprintList(ctypes.Structure):
     _fields_ = [
@@ -29,31 +41,20 @@ class FingerprintList(ctypes.Structure):
         ("size", ctypes.c_long)
     ]
 
-lib.init_empty_fingerprint.restype = ctypes.POINTER(Fingerprint)
-lib.fingerprint_destroy.argtypes = [ctypes.POINTER(Fingerprint)]
+lib.fpl_init.restype = ctypes.POINTER(FingerprintList)
+lib.fpl_destroy.argtypes = [ctypes.POINTER(FingerprintList)];
 
-lib.add_file_for_fingerprint.restype = ctypes.c_int32
-lib.add_file_for_fingerprint.argtypes = [ctypes.POINTER(Fingerprint), ctypes.c_char_p, ctypes.c_char_p]
+lib.fpl_add_path.argtypes = [ctypes.POINTER(FingerprintList), ctypes.c_char_p, ctypes.c_char_p]
+lib.fpl_add_bytes.argtypes = [ctypes.POINTER(FingerprintList), ctypes.c_char_p, ctypes.c_ulong, ctypes.c_char_p]
 
-lib.add_bytes_for_fingerprint.restype = ctypes.c_int32
-lib.add_bytes_for_fingerprint.argtypes = [ctypes.POINTER(Fingerprint), ctypes.c_char_p, ctypes.c_ulong, ctypes.c_char_p]
-
-
-lib.init_empty_fingerprintList.restype = ctypes.POINTER(FingerprintList)
-lib.fingerprintList_destroy.argtypes = [ctypes.POINTER(FingerprintList)];
-
-lib.addPathToFingerprintList.argtypes = [ctypes.POINTER(FingerprintList), ctypes.c_char_p, ctypes.c_char_p]
-lib.addBytesToFingerprintList.argtypes = [ctypes.POINTER(FingerprintList), ctypes.c_char_p, ctypes.c_ulong, ctypes.c_char_p]
-
-lib.get_fingerprintList.argtypes = [ctypes.POINTER(FingerprintList), ctypes.c_char_p, ctypes.c_long]
-lib.get_fingerprint.argtypes = [ctypes.POINTER(Fingerprint), ctypes.c_char_p, ctypes.c_long]
+lib.fpl_get.argtypes = [ctypes.POINTER(FingerprintList), ctypes.c_char_p, ctypes.c_long]
 
 class _MRSH_fp:
     def __init__(self):
-        self.fp = lib.init_empty_fingerprint()
+        self.fp = lib.fp_init()
 
     def __del__(self):
-        lib.fingerprint_destroy(self.fp)
+        lib.fp_destroy(self.fp)
 
     def __call__(self):
         # TODO: find an intuitive use case
@@ -62,18 +63,18 @@ class _MRSH_fp:
     def add(self, data):
         err = 0
         if isinstance(data, str):
-            err = lib.add_file_for_fingerprint(self.fp, data.encode(), None)
+            err = lib.fp_add_file(self.fp, data.encode(), None)
         elif isinstance(data, bytes):
-            err = lib.add_bytes_for_fingerprint(self.fp, data, len(data), b"n/a")
+            err = lib.fp_add_bytes(self.fp, data, len(data), b"n/a")
 
         elif isinstance(data, tuple):
             d = data[0]
             label = data[1].encode()
             if isinstance(d, str):
-                err = lib.add_file_for_fingerprint(self.fp, d.encode(), label)
+                err = lib.fp_add_file(self.fp, d.encode(), label)
 
             if isinstance(d, bytes):
-                err = lib.add_bytes_for_fingerprint(self.fp, d, len(d), label)
+                err = lib.fp_add_bytes(self.fp, d, len(d), label)
 
         if (err != 0):
             return None
@@ -81,15 +82,15 @@ class _MRSH_fp:
 
     def __str__(self):
         buf = ctypes.create_string_buffer(self.fp.contents.amount_of_BF+1 * 512 + 256)
-        lib.get_fingerprint(self.fp, buf, len(buf))
+        lib.fp_get(self.fp, buf, len(buf))
         return buf.value.decode()
 
 class _MRSH_fpl:
     def __init__(self):
-        self.fpl = lib.init_empty_fingerprintList()
+        self.fpl = lib.fpl_init()
 
     def __del__(self):
-        lib.fingerprintList_destroy(self.fpl)
+        lib.fpl_destroy(self.fpl)
 
     def __call__(self):
         # TODO: find an intuitive use case
@@ -97,19 +98,19 @@ class _MRSH_fpl:
 
     def add(self, elem):
         if isinstance(elem, str):
-            lib.addPathToFingerprintList(self.fpl, elem.encode(), None)
+            lib.fpl_add_path(self.fpl, elem.encode(), None)
 
         elif isinstance(elem, bytes):
-            lib.addBytesToFingerprintList(self.fpl, elem, len(elem), b"n/a")
+            lib.fpl_add_bytes(self.fpl, elem, len(elem), b"n/a")
 
         elif isinstance(elem, tuple):
             data = elem[0]
             label = elem[1].encode()
             if isinstance(data, str):
-                lib.addPathToFingerprintList(self.fpl, data.encode(), label)
+                lib.fpl_add_path(self.fpl, data.encode(), label)
 
             if isinstance(data, bytes):
-                lib.addBytesToFingerprintList(self.fpl, data, len(data), label)
+                lib.fpl_add_bytes(self.fpl, data, len(data), label)
 
         elif isinstance(elem, list):
             for e in elem:
@@ -126,10 +127,11 @@ class _MRSH_fpl:
         # TODO: calculate every bloom filter for every fp:
         # fp*(fp_x*fp_x_bf_num*512) {+additional headers}
         buf = ctypes.create_string_buffer(self.fpl.contents.size+1 * 512 + 256) # placeholder
-        lib.get_fingerprintList(self.fpl, buf, len(buf))
+        lib.fpl_get(self.fpl, buf, len(buf))
         return buf.value.decode()
 
     # could be moved to C for performance
+    # TODO: rework this into new comparison
     def compare_all(self, threshold=None):
         results = []
         fpl = ctypes.cast(self.fpl, ctypes.POINTER(FingerprintList)).contents
@@ -138,7 +140,7 @@ class _MRSH_fpl:
         while tmp1:
             tmp2 = tmp1.contents.next
             while tmp2:
-                score = lib.fingerprint_compare(tmp1, tmp2)
+                score = lib.fp_fp_compare(tmp1, tmp2)
                 name1 = tmp1.contents.file_name.decode()
                 name2 = tmp2.contents.file_name.decode()
 
@@ -170,10 +172,12 @@ def hash(data=None) -> str:
         obj.add(data)
     return obj.__str__()
 
-def compare(hash1:_MRSH_fp, hash2:_MRSH_fp, mode='default') -> Match:
+# TODO: rework comparison
+def compare(hash1, hash2, mode='default') -> Match:
     _ = mode
-    score = lib.fingerprint_compare(hash1.fp, hash2.fp)
+    score = lib.fp_fp_compare(hash1.fp, hash2.fp)
     return Match(hash1.fp.contents.file_name.decode(), hash2.fp.contents.file_name.decode(), score)
 
-def meta(hash:fp) -> str:
-    pass
+def meta(fingerprint:_MRSH_fp) -> Meta:
+    fp = fingerprint.fp
+    return Meta(fp.contents.file_name, fp.contents.filesize, fp.contents.amount_of_BF)

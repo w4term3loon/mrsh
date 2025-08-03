@@ -22,7 +22,7 @@
 MODES *mode;
 
 __attribute__((constructor)) void
-initalizeDefaultModes(void) {
+init_modes(void) {
   mode = (MODES *)malloc(sizeof(MODES));
   mode->compare = false;
   mode->gen_compare = false;
@@ -36,7 +36,7 @@ initalizeDefaultModes(void) {
 }
 
 __attribute__((destructor)) void
-destroyDefaultModes(void) {
+destroy_modes(void) {
   free((void *)mode);
   mode = NULL;
 }
@@ -47,68 +47,46 @@ is_file(const char *path);
 bool
 is_dir(const char *path);
 
+FINGERPRINT *
+fp_init(void) {
+  init_empty_fingerprint();
+}
+
 void
-addPathToFingerprintList(FINGERPRINT_LIST *fpl, char *filename, const char *label) {
-  DIR *dir;
-  struct dirent *ent;
-  const int max_path_length = 1024;
-
-  char *cur_dir = (char *)malloc(max_path_length);
-  getcwd(cur_dir, max_path_length);
-
-  // in case of a dir
-  if (is_dir(filename)) {
-    dir = opendir(filename);
-    chdir(filename);
-
-    // run through all files of the dir
-    while ((ent = readdir(dir)) != NULL) {
-
-      // if we found a file, generate hash value and add it
-      if (is_file(ent->d_name)) {
-        FILE *file = getFileHandle(ent->d_name);
-        FINGERPRINT *fp = init_fingerprint_for_file(file, ent->d_name);
-
-        // overwrite
-        // TODO: potentially move
-        if (label != NULL) {
-          strcpy(fp->file_name, label);
-        }
-
-        add_new_fingerprint(fpl, fp);
-      }
-
-      // when we found a dir and recursive mode is on, go deeper
-      else if (is_dir(ent->d_name) && mode->recursive) {
-        if (strcmp(ent->d_name, ".") == 0 || strcmp(ent->d_name, "..") == 0)
-          continue;
-        addPathToFingerprintList(fpl, ent->d_name, label);
-      }
-    }
-    chdir(cur_dir);
-    closedir(dir);
-  }
-
-  // in case we we have only a file
-  else if (is_file(filename)) {
-    FILE *file = getFileHandle(filename);
-    FINGERPRINT *fp = init_fingerprint_for_file(file, filename);
-
-    // overwrite
-    // TODO: potentially move
-    if (label != NULL) {
-      strcpy(fp->file_name, label);
-    }
-
-    add_new_fingerprint(fpl, fp);
-  }
-
-  return;
+fp_destroy(FINGERPRINT *fp) {
+  fingerprint_destroy(fp);
 }
 
 int
-hashBytesToFingerprint(FINGERPRINT *fingerprint, unsigned char *byte_buffer,
-                       unsigned long bytes_size) {
+fp_add_file(FINGERPRINT *fp, char *filename, const char *label) {
+  if (is_dir(filename)) {
+    return -1;
+  } else if (is_file(filename)) {
+    FILE *file = getFileHandle(filename);
+    fp->filesize = find_file_size(file);
+
+    if (!label) {
+      strcpy(fp->file_name, filename);
+    } else {
+      strcpy(fp->file_name, label);
+    }
+
+    hashFileToFingerprint(fp, file);
+    fclose(file);
+    return 0;
+  }
+  return -1;
+}
+
+FINGERPRINT *
+fp_init_file(char *filename, const char *label) {
+  FINGERPRINT *fp = init_empty_fingerprint();
+  fp_add_file(fp, filename, label);
+  return fp;
+}
+
+int
+fp_hash_bytes(FINGERPRINT *fingerprint, unsigned char *byte_buffer, unsigned long bytes_size) {
   short first = 1;
 
   unsigned int last_block_index = 0;
@@ -154,30 +132,32 @@ hashBytesToFingerprint(FINGERPRINT *fingerprint, unsigned char *byte_buffer,
   return 1;
 }
 
-FINGERPRINT *
-init_fingerprint_for_bytes(unsigned char *byte_buffer, unsigned long bytes_size,
-                           const char *label) {
-  FINGERPRINT *fp = init_empty_fingerprint();
-
+int
+fp_add_bytes(FINGERPRINT *fp, unsigned char *byte_buffer, unsigned long bytes_size,
+             const char *label) {
   // use existing field
   // TODO: fix
   strcpy(fp->file_name, label);
   fp->filesize = bytes_size;
 
-  hashBytesToFingerprint(fp, byte_buffer, bytes_size);
+  fp_hash_bytes(fp, byte_buffer, bytes_size);
+  return 0;
+}
+
+FINGERPRINT *
+fp_init_bytes(unsigned char *byte_buffer, unsigned long bytes_size, const char *label) {
+  FINGERPRINT *fp = init_empty_fingerprint();
+  fp_add_bytes(fp, byte_buffer, bytes_size, label);
   return fp;
 }
 
-void
-addBytesToFingerprintList(FINGERPRINT_LIST *fpl, unsigned char *byte_buffer,
-                          unsigned long bytes_size, const char *label) {
-  FINGERPRINT *fp = init_fingerprint_for_bytes(byte_buffer, bytes_size, label);
-  add_new_fingerprint(fpl, fp);
-  return;
+uint8_t
+fp_fp_compare(FINGERPRINT *fp1, FINGERPRINT *fp2) {
+  return (uint8_t)fingerprint_compare(fp1, fp2);
 }
 
 void
-get_fingerprint(FINGERPRINT *fp, char *buffer, size_t size) {
+fp_get(FINGERPRINT *fp, char *buffer, size_t size) {
   /* FORMAT: filename:filesize:number of filters:blocks in last filter*/
   int offset = snprintf(buffer, size, "%s:%d:%d:%d:", fp->file_name, fp->filesize,
                         fp->amount_of_BF + 1, fp->bf_list_last_element->amount_of_blocks);
@@ -193,15 +173,80 @@ get_fingerprint(FINGERPRINT *fp, char *buffer, size_t size) {
   }
 }
 
+
+
+FINGERPRINT_LIST *
+fpl_init(void) {
+  init_empty_fingerprintList();
+}
+
 void
-get_fingerprintList(FINGERPRINT_LIST *fpl, char *buffer, size_t size) {
+fpl_destroy(FINGERPRINT_LIST *fpl) {
+  fingerprintList_destroy(fpl);
+}
+
+void
+fpl_add_path(FINGERPRINT_LIST *fpl, char *filename, const char *label) {
+  DIR *dir;
+  struct dirent *ent;
+  const int max_path_length = 1024;
+
+  char *cur_dir = (char *)malloc(max_path_length);
+  getcwd(cur_dir, max_path_length);
+
+  // in case of a dir
+  if (is_dir(filename)) {
+    dir = opendir(filename);
+    chdir(filename);
+
+    // run through all files of the dir
+    while ((ent = readdir(dir)) != NULL) {
+
+      // if we found a file, generate hash value and add it
+      if (is_file(ent->d_name)) {
+        FILE *file = getFileHandle(ent->d_name);
+        FINGERPRINT *fp = fp_init_file(filename, label);
+        add_new_fingerprint(fpl, fp);
+      }
+
+      // when we found a dir and recursive mode is on, go deeper
+      else if (is_dir(ent->d_name) && mode->recursive) {
+        if (strcmp(ent->d_name, ".") == 0 || strcmp(ent->d_name, "..") == 0)
+          continue;
+        fpl_add_path(fpl, ent->d_name, label);
+      }
+    }
+    chdir(cur_dir);
+    closedir(dir);
+  }
+
+  // in case we we have only a file
+  else if (is_file(filename)) {
+    FILE *file = getFileHandle(filename);
+    FINGERPRINT *fp = fp_init_file(filename, label);
+    add_new_fingerprint(fpl, fp);
+  }
+
+  return;
+}
+
+void
+fpl_add_bytes(FINGERPRINT_LIST *fpl, unsigned char *byte_buffer, unsigned long bytes_size,
+              const char *label) {
+  FINGERPRINT *fp = fp_init_bytes(byte_buffer, bytes_size, label);
+  add_new_fingerprint(fpl, fp);
+  return;
+}
+
+void
+fpl_get(FINGERPRINT_LIST *fpl, char *buffer, size_t size) {
   FINGERPRINT *tmp = fpl->list;
   int offset = 0;
 
   char temp[1024]; // temporary buffer for one fingerprint
 
   while (tmp != NULL && offset < size - 1) {
-    get_fingerprint(tmp, temp, sizeof(temp));
+    fp_get(tmp, temp, sizeof(temp));
 
     int len = snprintf(buffer + offset, size - offset, "%s", temp);
 
@@ -222,36 +267,4 @@ get_fingerprintList(FINGERPRINT_LIST *fpl, char *buffer, size_t size) {
   buffer[offset < size ? offset : size - 1] = '\0'; // safe null-termination
 }
 
-int
-add_file_for_fingerprint(FINGERPRINT *fp, char *filename, const char* label) {
-  if (is_dir(filename)) {
-    return -1;
-  } else if (is_file(filename)) {
-    FILE *file = getFileHandle(filename);
-    fp->filesize = find_file_size(file);
-
-    if (!label) {
-      strcpy(fp->file_name, filename);
-    } else {
-      strcpy(fp->file_name, label);
-    }
-
-    hashFileToFingerprint(fp, file);
-    fclose(file);
-    return 0;
-  }
-  return -1;
-}
-
-int
-add_bytes_for_fingerprint(FINGERPRINT *fp, unsigned char *byte_buffer, unsigned long bytes_size,
-                           const char *label) {
-  // use existing field
-  // TODO: fix
-  strcpy(fp->file_name, label);
-  fp->filesize = bytes_size;
-
-  hashBytesToFingerprint(fp, byte_buffer, bytes_size);
-  return 0;
-}
 
