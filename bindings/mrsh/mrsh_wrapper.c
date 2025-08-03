@@ -48,7 +48,7 @@ bool
 is_dir(const char *path);
 
 void
-addPathToFingerprintList(FINGERPRINT_LIST *fpl, char *filename, const char* label) {
+addPathToFingerprintList(FINGERPRINT_LIST *fpl, char *filename, const char *label) {
   DIR *dir;
   struct dirent *ent;
   const int max_path_length = 1024;
@@ -155,7 +155,8 @@ hashBytesToFingerprint(FINGERPRINT *fingerprint, unsigned char *byte_buffer,
 }
 
 FINGERPRINT *
-init_fingerprint_for_bytes(unsigned char *byte_buffer, unsigned long bytes_size, const char *label) {
+init_fingerprint_for_bytes(unsigned char *byte_buffer, unsigned long bytes_size,
+                           const char *label) {
   FINGERPRINT *fp = init_empty_fingerprint();
 
   // use existing field
@@ -220,3 +221,37 @@ get_fingerprintList(FINGERPRINT_LIST *fpl, char *buffer, size_t size) {
 
   buffer[offset < size ? offset : size - 1] = '\0'; // safe null-termination
 }
+
+int
+add_file_for_fingerprint(FINGERPRINT *fp, char *filename, const char* label) {
+  if (is_dir(filename)) {
+    return -1;
+  } else if (is_file(filename)) {
+    FILE *file = getFileHandle(filename);
+    fp->filesize = find_file_size(file);
+
+    if (!label) {
+      strcpy(fp->file_name, filename);
+    } else {
+      strcpy(fp->file_name, label);
+    }
+
+    hashFileToFingerprint(fp, file);
+    fclose(file);
+    return 0;
+  }
+  return -1;
+}
+
+int
+add_bytes_for_fingerprint(FINGERPRINT *fp, unsigned char *byte_buffer, unsigned long bytes_size,
+                           const char *label) {
+  // use existing field
+  // TODO: fix
+  strcpy(fp->file_name, label);
+  fp->filesize = bytes_size;
+
+  hashBytesToFingerprint(fp, byte_buffer, bytes_size);
+  return 0;
+}
+
