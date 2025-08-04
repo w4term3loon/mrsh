@@ -2,10 +2,8 @@ import os
 import ctypes
 
 from collections import namedtuple
-Match = namedtuple('Match', ['hash1', 'hash2', 'score'])
-Meta = namedtuple('Meta', ['name', 'size', 'filters'])
 
-lib_path = os.path.join(os.path.dirname(__file__), "_native.so")
+lib_path = os.path.join(os.path.dirname(__file__), "libmrsh.so")
 lib = ctypes.CDLL(lib_path)
 
 # define C signatures
@@ -20,7 +18,11 @@ Fingerprint._fields_ = [
         ("filesize", ctypes.c_uint32),
     ]
 
+Metadata = namedtuple('Metadata', ['name', 'size', 'filters'])
+
 lib.fp_init.restype = ctypes.POINTER(Fingerprint)
+
+lib.fp_destroy.restype = None
 lib.fp_destroy.argtypes = [ctypes.POINTER(Fingerprint)]
 
 lib.fp_add_file.restype = ctypes.c_int32
@@ -32,7 +34,8 @@ lib.fp_add_bytes.argtypes = [ctypes.POINTER(Fingerprint), ctypes.c_char_p, ctype
 lib.fp_fp_compare.restype = ctypes.c_uint8
 lib.fp_fp_compare.argtypes = [ctypes.POINTER(Fingerprint), ctypes.POINTER(Fingerprint)]
 
-lib.fp_get.argtypes = [ctypes.POINTER(Fingerprint), ctypes.c_char_p, ctypes.c_long]
+lib.fp_str.restype = ctypes.c_void_p
+lib.fp_str.argtypes = [ctypes.POINTER(Fingerprint)]
 
 class FingerprintList(ctypes.Structure):
     _fields_ = [
@@ -42,12 +45,46 @@ class FingerprintList(ctypes.Structure):
     ]
 
 lib.fpl_init.restype = ctypes.POINTER(FingerprintList)
+
+lib.fpl_destroy.restype = None
 lib.fpl_destroy.argtypes = [ctypes.POINTER(FingerprintList)];
 
 lib.fpl_add_path.argtypes = [ctypes.POINTER(FingerprintList), ctypes.c_char_p, ctypes.c_char_p]
 lib.fpl_add_bytes.argtypes = [ctypes.POINTER(FingerprintList), ctypes.c_char_p, ctypes.c_ulong, ctypes.c_char_p]
 
-lib.fpl_get.argtypes = [ctypes.POINTER(FingerprintList), ctypes.c_char_p, ctypes.c_long]
+lib.fpl_str.restype = ctypes.c_void_p
+lib.fpl_str.argtypes = [ctypes.POINTER(FingerprintList)]
+
+lib.str_free.restype = None
+lib.str_free.argtypes = [ctypes.c_void_p]
+
+class Compare(ctypes.Structure):
+    _fields_ = [
+        ("name1", ctypes.c_char_p),
+        ("name2", ctypes.c_char_p),
+        ("score", ctypes.c_uint8)
+    ]
+
+class CompareList(ctypes.Structure):
+    _fields_ = [
+        ("list", ctypes.POINTER(Compare)),
+        ("size", ctypes.c_long)
+    ]
+
+Comparison = namedtuple('Comparison', ['hash1', 'hash2', 'score'])
+def cl_to_list(cl_ptr) -> list:
+    cl = cl_ptr.contents
+    return [
+        Comparison(cl.list[i].name1.decode(), cl.list[i].name2.decode(), cl.list[i].score)
+        for i in range(cl.size)
+    ]
+
+lib.cl_fpl_all.restype = ctypes.POINTER(CompareList)
+lib.cl_fpl_all.argtypes = [ctypes.POINTER(FingerprintList), ctypes.c_uint8]
+
+lib.cl_free.restype = None
+lib.cl_free.argtypes = [ctypes.POINTER(CompareList)]
+# TODO: class, and desctructor for gc-ability
 
 class _MRSH_fp:
     def __init__(self):
@@ -81,9 +118,18 @@ class _MRSH_fp:
         return self
 
     def __str__(self):
-        buf = ctypes.create_string_buffer(self.fp.contents.amount_of_BF+1 * 512 + 256)
-        lib.fp_get(self.fp, buf, len(buf))
-        return buf.value.decode()
+        raw = lib.fp_str(self.fp)
+        if not raw:
+            return ""
+
+        data = ctypes.string_at(raw)
+        lib.str_free(raw)
+        return data.decode('utf-8', errors='replace')
+
+    def meta(self) -> Metadata:
+        fp = self.fp
+        return Metadata(fp.contents.file_name.rstrip(b'\0').decode(),
+                        fp.contents.filesize, fp.contents.amount_of_BF)
 
 class _MRSH_fpl:
     def __init__(self):
@@ -109,14 +155,17 @@ class _MRSH_fpl:
             if isinstance(data, str):
                 lib.fpl_add_path(self.fpl, data.encode(), label)
 
-            if isinstance(data, bytes):
+            elif isinstance(data, bytes):
                 lib.fpl_add_bytes(self.fpl, data, len(data), label)
+            else:
+                raise TypeError("Unsupported data type in tuple")
 
         elif isinstance(elem, list):
             for e in elem:
                 self.add(e)
         else:
             raise TypeError("Unsupported input type")
+
         return self
 
     def __iadd__(self, other):
@@ -124,35 +173,19 @@ class _MRSH_fpl:
         return self
 
     def __str__(self):
-        # TODO: calculate every bloom filter for every fp:
-        # fp*(fp_x*fp_x_bf_num*512) {+additional headers}
-        buf = ctypes.create_string_buffer(self.fpl.contents.size+1 * 512 + 256) # placeholder
-        lib.fpl_get(self.fpl, buf, len(buf))
-        return buf.value.decode()
+        raw = lib.fpl_str(self.fpl)
+        if not raw:
+            return ""
 
-    # could be moved to C for performance
-    # TODO: rework this into new comparison
-    def compare_all(self, threshold=None):
-        results = []
-        fpl = ctypes.cast(self.fpl, ctypes.POINTER(FingerprintList)).contents
+        data = ctypes.string_at(raw)
+        lib.str_free(raw)
+        return data.decode('utf-8', errors='replace')
 
-        tmp1 = fpl.list
-        while tmp1:
-            tmp2 = tmp1.contents.next
-            while tmp2:
-                score = lib.fp_fp_compare(tmp1, tmp2)
-                name1 = tmp1.contents.file_name.decode()
-                name2 = tmp2.contents.file_name.decode()
-
-                if threshold is None:
-                    results.append(Match(name1, name2, score))
-                elif threshold <= score:
-                    results.append(Match(name1, name2, score))
-
-                tmp2 = tmp2.contents.next
-            tmp1 = tmp1.contents.next
-
-        return results
+    def compare_all(self, threshold=0):
+        cl_ptr = lib.cl_fpl_all(self.fpl, threshold);
+        result = cl_to_list(cl_ptr)
+        lib.cl_free(cl_ptr)
+        return result
 
 def fp(data=None) -> _MRSH_fp:
     obj = _MRSH_fp()
@@ -172,12 +205,9 @@ def hash(data=None) -> str:
         obj.add(data)
     return obj.__str__()
 
-# TODO: rework comparison
-def compare(hash1, hash2, mode='default') -> Match:
+# TODO: other types
+def compare(hash1, hash2, mode='default') -> Comparison:
     _ = mode
     score = lib.fp_fp_compare(hash1.fp, hash2.fp)
-    return Match(hash1.fp.contents.file_name.decode(), hash2.fp.contents.file_name.decode(), score)
+    return Comparison(hash1.fp.contents.file_name.decode(), hash2.fp.contents.file_name.decode(), score)
 
-def meta(fingerprint:_MRSH_fp) -> Meta:
-    fp = fingerprint.fp
-    return Meta(fp.contents.file_name, fp.contents.filesize, fp.contents.amount_of_BF)

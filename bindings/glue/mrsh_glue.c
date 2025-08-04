@@ -49,7 +49,7 @@ is_dir(const char *path);
 
 FINGERPRINT *
 fp_init(void) {
-  init_empty_fingerprint();
+  return init_empty_fingerprint();
 }
 
 void
@@ -156,28 +156,56 @@ fp_fp_compare(FINGERPRINT *fp1, FINGERPRINT *fp2) {
   return (uint8_t)fingerprint_compare(fp1, fp2);
 }
 
-void
-fp_get(FINGERPRINT *fp, char *buffer, size_t size) {
-  /* FORMAT: filename:filesize:number of filters:blocks in last filter*/
-  int offset = snprintf(buffer, size, "%s:%d:%d:%d:", fp->file_name, fp->filesize,
-                        fp->amount_of_BF + 1, fp->bf_list_last_element->amount_of_blocks);
+char *
+fp_str(FINGERPRINT *fp) {
+  if (!fp) {
+    return NULL;
+  }
 
+  int j;
   BLOOMFILTER *bf = fp->bf_list;
-  while (bf != NULL) {
-    // Print each Bloom filter as a 2-digit-hex value
-    for (int j = 0; j < FILTERSIZE; j++)
-      offset += snprintf(buffer + offset, size - offset, "%02X", bf->array[j]);
 
-    // move to next Bloom filter
+  size_t metadata_len = strlen(fp->file_name) + 64;         // generous space for numbers
+  size_t hex_len = (fp->amount_of_BF + 1) * FILTERSIZE * 2; // 2 hex chars per byte
+  size_t total_len = metadata_len + hex_len + 10;           // +10 for newlines and safety
+
+  char *result = malloc(total_len);
+  if (!result) {
+    return NULL;
+  }
+
+  // metadata
+  int pos = snprintf(result, total_len, "%s:%d:%d:%d:", fp->file_name, fp->filesize,
+                     fp->amount_of_BF + 1, fp->bf_list_last_element->amount_of_blocks);
+  if (pos < 0 || pos >= total_len) {
+    free(result);
+    return NULL;
+  }
+
+  // add BFs
+  while (bf != NULL && pos < total_len - 2) {
+    for (j = 0; j < FILTERSIZE && pos < total_len - 2; j++) {
+      int written = snprintf(result + pos, total_len - pos, "%02X", bf->array[j]);
+      if (written != 2) { // sanity check
+        free(result);
+        return NULL;
+      }
+      pos += 2;
+    }
     bf = bf->next;
   }
+
+  // null terminate
+  if (pos < total_len) {
+    result[pos] = '\0';
+  }
+
+  return result;
 }
-
-
 
 FINGERPRINT_LIST *
 fpl_init(void) {
-  init_empty_fingerprintList();
+  return init_empty_fingerprintList();
 }
 
 void
@@ -238,33 +266,123 @@ fpl_add_bytes(FINGERPRINT_LIST *fpl, unsigned char *byte_buffer, unsigned long b
   return;
 }
 
-void
-fpl_get(FINGERPRINT_LIST *fpl, char *buffer, size_t size) {
-  FINGERPRINT *tmp = fpl->list;
-  int offset = 0;
+char *
+fpl_str(FINGERPRINT_LIST *fpl) {
+  if (!fpl || !fpl->list)
+    return NULL;
 
-  char temp[1024]; // temporary buffer for one fingerprint
-
-  while (tmp != NULL && offset < size - 1) {
-    fp_get(tmp, temp, sizeof(temp));
-
-    int len = snprintf(buffer + offset, size - offset, "%s", temp);
-
-    if (len < 0 || len >= (int)(size - offset)) {
-      break; // would overflow, stop writing
-    }
-
-    offset += len;
-
-    // add new line only between elements
-    if (tmp->next != NULL && offset < size - 1) {
-      buffer[offset++] = '\n';
-    }
-
-    tmp = tmp->next;
+  // estimate total length
+  size_t total_len = 0;
+  for (FINGERPRINT *fp = fpl->list; fp; fp = fp->next) {
+    size_t meta = strlen(fp->file_name) + 64;             // filename + ints + colons
+    size_t hex = (fp->amount_of_BF + 1) * FILTERSIZE * 2; // 2 hex chars per byte
+    total_len += meta + hex + 1;                          // +1 for newline or final NUL
   }
 
-  buffer[offset < size ? offset : size - 1] = '\0'; // safe null-termination
+  char *result = calloc(1, total_len + 1); // +1 for final NUL
+  if (!result)
+    return NULL;
+
+  // fill buffer
+  size_t pos = 0;
+  for (FINGERPRINT *fp = fpl->list; fp; fp = fp->next) {
+    // metadata header
+    int n = snprintf(result + pos, total_len + 1 - pos, "%s:%d:%d:%d:", fp->file_name, fp->filesize,
+                     fp->amount_of_BF + 1, fp->bf_list_last_element->amount_of_blocks);
+    if (n < 0 || (size_t)n >= total_len + 1 - pos) {
+      free(result);
+      return NULL;
+    }
+    pos += n;
+
+    // bloom-filter bytes as hex
+    for (BLOOMFILTER *bf = fp->bf_list; bf; bf = bf->next) {
+      for (int j = 0; j < FILTERSIZE; j++) {
+        if (pos + 2 >= total_len + 1) {
+          result[total_len] = '\0';
+          return result;
+        }
+        int w = snprintf(result + pos, total_len + 1 - pos, "%02X", bf->array[j]);
+        if (w != 2) {
+          free(result);
+          return NULL;
+        }
+        pos += 2;
+      }
+    }
+
+    // newline between entries
+    if (fp->next) {
+      if (pos < total_len)
+        result[pos++] = '\n';
+    }
+  }
+
+  // final NULL
+  result[pos < total_len ? pos : total_len] = '\0';
+  return result;
 }
 
+void
+str_free(char *str) {
+  if (str != NULL) {
+    free(str);
+  }
+}
 
+typedef struct {
+  char *name1;
+  char *name2;
+  uint8_t score;
+} compare_t;
+
+typedef struct {
+  compare_t *list;
+  size_t size;
+} compare_list_t;
+
+compare_list_t *
+cl_fpl_all(FINGERPRINT_LIST *fpl, uint8_t threshold) {
+  compare_list_t *cl = (compare_list_t *)malloc(sizeof(compare_list_t));
+  if (!cl) {
+    return NULL;
+  }
+
+  // Allocate for theoretical maximum
+  size_t max_size = (fpl->size * (fpl->size + 1)) / 2;
+  cl->list = (compare_t *)calloc(max_size, sizeof(compare_t));
+  if (!cl->list) {
+    free(cl);
+    return NULL;
+  }
+
+  size_t iter = 0;
+  uint8_t score = 0;
+  FINGERPRINT *fp2, *fp1 = fpl->list;
+
+  while (fp1 != NULL) {
+    fp2 = fp1->next;
+    while (fp2 != NULL) {
+      score = fingerprint_compare(fp1, fp2);
+      if (score >= threshold) {
+        cl->list[iter].name1 = fp1->file_name;
+        cl->list[iter].name2 = fp2->file_name;
+        cl->list[iter++].score = score;
+      }
+      fp2 = fp2->next;
+    }
+    fp1 = fp1->next;
+  }
+
+  cl->size = iter;
+
+  return cl;
+}
+
+void
+cl_free(compare_list_t *cl) {
+  if (cl) {
+    free((void *)cl->list);
+    free(cl);
+  }
+}
