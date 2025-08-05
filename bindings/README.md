@@ -2,6 +2,9 @@
 
 Thin, ctypes-based Python bindings for the [mrsh CLI tool](https://github.com/w4term3loon/mrsh). Implements the Bloom-filter–based similarity hashing algorithm originally proposed by Frank Breitinger and Harald Baier in their paper Similarity Preserving Hashing: Eligible Properties and a new Algorithm MRSH-v2 (da/sec Biometrics and Internet Security Research Group, Hochschule Darmstadt). Use Bloom-filter–based fingerprinting directly from Python with minimal overhead.
 
+> [!IMPORTANT]
+> For a more complete api ducumentation please refer to [docs/api.md](./docs/api.md)
+
 ---
 
 ## Installation
@@ -12,10 +15,10 @@ Install from PyPI:
 pip install mrshw
 ```
 
-Or directly from GitHub (tagged release `v0.1.0b3`):
+Or directly from GitHub (tagged release `v0.1.0b4`):
 
 ```bash
-pip install git+https://github.com/w4term3loon/mrsh.git@v0.1.0b3
+pip install git+https://github.com/w4term3loon/mrsh.git@v0.1.0b4
 ```
 
 ---
@@ -54,6 +57,6 @@ for comp in results:
 
 ## License
 
-* **Wrapper code:** MIT License. See the [LICENSE file](https://github.com/w4term3loon/mrsh/blob/tree/master/bindings/LICENSE) for full terms.
-* **Underlying C library:** Apache License 2.0. See its [repository license](https://https://github.com/w4term3loon/mrsh/blob/master/LICENSE.md).
+* **Wrapper code:** MIT License. See the [LICENSE file](https://github.com/w4term3loon/mrsh/blob/master/bindings/LICENSE) for full terms.
+* **Underlying C library:** Apache License 2.0. See its [repository license](https://github.com/w4term3loon/mrsh/blob/master/LICENSE.md).
 

@@ -31,8 +31,8 @@ lib.fp_add_file.argtypes = [ctypes.POINTER(Fingerprint), ctypes.c_char_p, ctypes
 lib.fp_add_bytes.restype = ctypes.c_int32
 lib.fp_add_bytes.argtypes = [ctypes.POINTER(Fingerprint), ctypes.c_char_p, ctypes.c_ulong, ctypes.c_char_p]
 
-lib.fp_fp_compare.restype = ctypes.c_uint8
-lib.fp_fp_compare.argtypes = [ctypes.POINTER(Fingerprint), ctypes.POINTER(Fingerprint)]
+lib.fp_compare.restype = ctypes.c_uint8
+lib.fp_compare.argtypes = [ctypes.POINTER(Fingerprint), ctypes.POINTER(Fingerprint)]
 
 lib.fp_str.restype = ctypes.c_void_p
 lib.fp_str.argtypes = [ctypes.POINTER(Fingerprint)]
@@ -81,6 +81,12 @@ def cl_to_list(cl_ptr) -> list:
 
 lib.cl_fpl_all.restype = ctypes.POINTER(CompareList)
 lib.cl_fpl_all.argtypes = [ctypes.POINTER(FingerprintList), ctypes.c_uint8]
+
+lib.cl_fpl_vs_fpl.restype = ctypes.POINTER(CompareList)
+lib.cl_fpl_vs_fpl.argtypes = [ctypes.POINTER(FingerprintList), ctypes.POINTER(FingerprintList), ctypes.c_uint8]
+
+lib.cl_fp_vs_fpl.restype = ctypes.POINTER(CompareList)
+lib.cl_fp_vs_fpl.argtypes = [ctypes.POINTER(Fingerprint), ctypes.POINTER(FingerprintList), ctypes.c_uint8]
 
 lib.cl_free.restype = None
 lib.cl_free.argtypes = [ctypes.POINTER(CompareList)]
@@ -206,8 +212,38 @@ def hash(data=None) -> str:
     return obj.__str__()
 
 # TODO: other types
-def compare(hash1, hash2, mode='default') -> Comparison:
+def compare(entity1, entity2, threshold=0, mode='default') -> list:
     _ = mode
-    score = lib.fp_fp_compare(hash1.fp, hash2.fp)
-    return Comparison(hash1.fp.contents.file_name.decode(), hash2.fp.contents.file_name.decode(), score)
+    result = []
 
+    if isinstance(entity1, _MRSH_fp):
+        if isinstance(entity2, _MRSH_fp):
+            name1 = entity1.fp.contents.file_name
+            name2 = entity2.fp.contents.file_name
+            score = lib.fp_compare(entity1.fp, entity2.fp)
+            result = [Comparison(name1, name2, score)]
+
+        elif isinstance(entity2, _MRSH_fpl):
+            cl_ptr = lib.cl_fp_vs_fpl(entity1.fp, entity2.fpl, threshold);
+            result = cl_to_list(cl_ptr)
+            lib.cl_free(cl_ptr)
+        else:
+            raise TypeError("Unsupported input type")
+
+    elif isinstance(entity1, _MRSH_fpl):
+        if isinstance(entity2, _MRSH_fp):
+            cl_ptr = lib.cl_fp_vs_fpl(entity1.fpl, entity2.fp, threshold);
+            result = cl_to_list(cl_ptr)
+            lib.cl_free(cl_ptr)
+
+        if isinstance(entity2, _MRSH_fpl):
+            cl_ptr = lib.cl_fpl_vs_fpl(entity1.fpl, entity2.fpl, threshold);
+            result = cl_to_list(cl_ptr)
+            lib.cl_free(cl_ptr)
+        else:
+            raise TypeError("Unsupported input type")
+
+    else:
+        raise TypeError("Unsupported input type")
+
+    return result

@@ -1,5 +1,5 @@
 .cache/
 compile_commands.json
-bindings/mrsh/_native.so
-bindings/mrsh/__pycache__/
+bindings/mrshw/libmrsh.so
+bindings/mrshw/__pycache__/
 mrsh

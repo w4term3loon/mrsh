@@ -21,6 +21,10 @@
 
 MODES *mode;
 
+/**
+ * @brief Initialize global mode configuration structure
+ * @note Called automatically at program startup via __attribute__((constructor))
+ */
 __attribute__((constructor)) void
 init_modes(void) {
   mode = (MODES *)malloc(sizeof(MODES));
@@ -35,6 +39,10 @@ init_modes(void) {
   mode->path_list_compare = false;
 }
 
+/**
+ * @brief Clean up global mode configuration structure
+ * @note Called automatically at program exit via __attribute__((destructor))
+ */
 __attribute__((destructor)) void
 destroy_modes(void) {
   free((void *)mode);
@@ -47,16 +55,32 @@ is_file(const char *path);
 bool
 is_dir(const char *path);
 
+/**
+ * @brief Initialize an empty fingerprint structure
+ * @return Pointer to newly allocated empty fingerprint, or NULL on error
+ */
 FINGERPRINT *
 fp_init(void) {
   return init_empty_fingerprint();
 }
 
+/**
+ * @brief Destroy and free a fingerprint structure
+ * @param fp Fingerprint to destroy
+ */
 void
 fp_destroy(FINGERPRINT *fp) {
   fingerprint_destroy(fp);
 }
 
+/**
+ * @brief Add a file to an existing fingerprint by hashing its contents
+ * @param fp Fingerprint structure to populate
+ * @param filename Path to file to hash
+ * @param label Optional label to use instead of filename (can be NULL)
+ * @return 0 on success, -1 on error
+ * @note Only processes regular files, not directories
+ */
 int
 fp_add_file(FINGERPRINT *fp, char *filename, const char *label) {
   if (is_dir(filename)) {
@@ -78,6 +102,12 @@ fp_add_file(FINGERPRINT *fp, char *filename, const char *label) {
   return -1;
 }
 
+/**
+ * @brief Create a new fingerprint from a file
+ * @param filename Path to file to hash
+ * @param label Optional label to use instead of filename (can be NULL)
+ * @return Pointer to newly created fingerprint, or NULL on error
+ */
 FINGERPRINT *
 fp_init_file(char *filename, const char *label) {
   FINGERPRINT *fp = init_empty_fingerprint();
@@ -85,6 +115,14 @@ fp_init_file(char *filename, const char *label) {
   return fp;
 }
 
+/**
+ * @brief Hash raw bytes into a fingerprint using rolling hash algorithm
+ * @param fingerprint Fingerprint structure to populate with hash values
+ * @param byte_buffer Raw bytes to hash
+ * @param bytes_size Size of byte buffer
+ * @return 1 on success
+ * @note Uses rolling hash with FNV-64 for block boundaries
+ */
 int
 fp_hash_bytes(FINGERPRINT *fingerprint, unsigned char *byte_buffer, unsigned long bytes_size) {
   short first = 1;
@@ -132,11 +170,17 @@ fp_hash_bytes(FINGERPRINT *fingerprint, unsigned char *byte_buffer, unsigned lon
   return 1;
 }
 
+/**
+ * @brief Add raw bytes to an existing fingerprint
+ * @param fp Fingerprint structure to populate
+ * @param byte_buffer Raw bytes to hash
+ * @param bytes_size Size of byte buffer
+ * @param label Label to assign to this fingerprint
+ * @return 0 on success
+ */
 int
 fp_add_bytes(FINGERPRINT *fp, unsigned char *byte_buffer, unsigned long bytes_size,
              const char *label) {
-  // use existing field
-  // TODO: fix
   strcpy(fp->file_name, label);
   fp->filesize = bytes_size;
 
@@ -144,6 +188,13 @@ fp_add_bytes(FINGERPRINT *fp, unsigned char *byte_buffer, unsigned long bytes_si
   return 0;
 }
 
+/**
+ * @brief Create a new fingerprint from raw bytes
+ * @param byte_buffer Raw bytes to hash
+ * @param bytes_size Size of byte buffer
+ * @param label Label to assign to this fingerprint
+ * @return Pointer to newly created fingerprint
+ */
 FINGERPRINT *
 fp_init_bytes(unsigned char *byte_buffer, unsigned long bytes_size, const char *label) {
   FINGERPRINT *fp = init_empty_fingerprint();
@@ -151,11 +202,13 @@ fp_init_bytes(unsigned char *byte_buffer, unsigned long bytes_size, const char *
   return fp;
 }
 
-uint8_t
-fp_fp_compare(FINGERPRINT *fp1, FINGERPRINT *fp2) {
-  return (uint8_t)fingerprint_compare(fp1, fp2);
-}
-
+/**
+ * @brief Convert a fingerprint to its string representation
+ * @param fp Fingerprint to convert
+ * @return Allocated string containing fingerprint data in hex format, or NULL on error
+ * @note Format: "filename:filesize:bf_count:blocks:HEXDATA"
+ * @note Caller must free returned string with str_free()
+ */
 char *
 fp_str(FINGERPRINT *fp) {
   if (!fp) {
@@ -203,16 +256,32 @@ fp_str(FINGERPRINT *fp) {
   return result;
 }
 
+/**
+ * @brief Initialize an empty fingerprint list
+ * @return Pointer to newly allocated empty fingerprint list
+ */
 FINGERPRINT_LIST *
 fpl_init(void) {
   return init_empty_fingerprintList();
 }
 
+/**
+ * @brief Destroy and free a fingerprint list and all its fingerprints
+ * @param fpl Fingerprint list to destroy
+ */
 void
 fpl_destroy(FINGERPRINT_LIST *fpl) {
   fingerprintList_destroy(fpl);
 }
 
+/**
+ * @brief Add all files from a path (file or directory) to fingerprint list
+ * @param fpl Fingerprint list to add to
+ * @param filename Path to file or directory
+ * @param label Optional label prefix for entries (can be NULL)
+ * @note If filename is a directory, recursively processes all files within
+ * @note Respects global mode->recursive setting for subdirectory traversal
+ */
 void
 fpl_add_path(FINGERPRINT_LIST *fpl, char *filename, const char *label) {
   DIR *dir;
@@ -233,7 +302,7 @@ fpl_add_path(FINGERPRINT_LIST *fpl, char *filename, const char *label) {
       // if we found a file, generate hash value and add it
       if (is_file(ent->d_name)) {
         FILE *file = getFileHandle(ent->d_name);
-        FINGERPRINT *fp = fp_init_file(filename, label);
+        FINGERPRINT *fp = init_fingerprint_for_file(file, ent->d_name);
         add_new_fingerprint(fpl, fp);
       }
 
@@ -255,9 +324,17 @@ fpl_add_path(FINGERPRINT_LIST *fpl, char *filename, const char *label) {
     add_new_fingerprint(fpl, fp);
   }
 
+  free(cur_dir);
   return;
 }
 
+/**
+ * @brief Add raw bytes as a fingerprint to the list
+ * @param fpl Fingerprint list to add to
+ * @param byte_buffer Raw bytes to hash
+ * @param bytes_size Size of byte buffer
+ * @param label Label to assign to this fingerprint entry
+ */
 void
 fpl_add_bytes(FINGERPRINT_LIST *fpl, unsigned char *byte_buffer, unsigned long bytes_size,
               const char *label) {
@@ -266,6 +343,13 @@ fpl_add_bytes(FINGERPRINT_LIST *fpl, unsigned char *byte_buffer, unsigned long b
   return;
 }
 
+/**
+ * @brief Convert entire fingerprint list to string representation
+ * @param fpl Fingerprint list to convert
+ * @return Allocated string containing all fingerprints separated by newlines, or NULL on error
+ * @note Each line follows format: "filename:filesize:bf_count:blocks:HEXDATA"
+ * @note Caller must free returned string with str_free()
+ */
 char *
 fpl_str(FINGERPRINT_LIST *fpl) {
   if (!fpl || !fpl->list)
@@ -323,6 +407,11 @@ fpl_str(FINGERPRINT_LIST *fpl) {
   return result;
 }
 
+/**
+ * @brief Free a string allocated by fp_str() or fpl_str()
+ * @param str String to free
+ * @note Safe to call with NULL pointer
+ */
 void
 str_free(char *str) {
   if (str != NULL) {
@@ -341,44 +430,159 @@ typedef struct {
   size_t size;
 } compare_list_t;
 
+/**
+ * @brief Compare fingerprint similarity score between two fingerprints
+ * @param fp1 First fingerprint to compare
+ * @param fp2 Second fingerprint to compare
+ * @return Similarity score as uint8_t (0-100)
+ */
+uint8_t
+fp_compare(FINGERPRINT *fp1, FINGERPRINT *fp2) {
+  return (uint8_t)fingerprint_compare(fp1, fp2);
+}
+
+/**
+ * @brief Compare every fingerprint with every other fingerprint in a list
+ * @param fpl Fingerprint list to process
+ * @param threshold Minimum similarity score to include in results
+ * @return Allocated compare_list_t containing all matches above threshold, or NULL on error
+ * @note Avoids duplicate comparisons (A vs B, but not B vs A)
+ * @note Caller must free returned structure with cl_free()
+ */
 compare_list_t *
 cl_fpl_all(FINGERPRINT_LIST *fpl, uint8_t threshold) {
-  compare_list_t *cl = (compare_list_t *)malloc(sizeof(compare_list_t));
-  if (!cl) {
+  if (!fpl || fpl->size == 0)
     return NULL;
-  }
 
-  // Allocate for theoretical maximum
-  size_t max_size = (fpl->size * (fpl->size + 1)) / 2;
-  cl->list = (compare_t *)calloc(max_size, sizeof(compare_t));
+  compare_list_t *cl = malloc(sizeof(compare_list_t));
+  if (!cl)
+    return NULL;
+
+  // Maximum possible comparisons: n*(n-1)/2
+  size_t max_size = (fpl->size * (fpl->size - 1)) / 2;
+  cl->list = calloc(max_size, sizeof(compare_t));
   if (!cl->list) {
     free(cl);
     return NULL;
   }
 
-  size_t iter = 0;
-  uint8_t score = 0;
-  FINGERPRINT *fp2, *fp1 = fpl->list;
+  size_t count = 0;
+  FINGERPRINT *fp1 = fpl->list;
 
-  while (fp1 != NULL) {
-    fp2 = fp1->next;
-    while (fp2 != NULL) {
-      score = fingerprint_compare(fp1, fp2);
+  while (fp1) {
+    FINGERPRINT *fp2 = fp1->next;
+    while (fp2) {
+      uint8_t score = fp_compare(fp1, fp2);
       if (score >= threshold) {
-        cl->list[iter].name1 = fp1->file_name;
-        cl->list[iter].name2 = fp2->file_name;
-        cl->list[iter++].score = score;
+        cl->list[count].name1 = fp1->file_name;
+        cl->list[count].name2 = fp2->file_name;
+        cl->list[count].score = score;
+        count++;
       }
       fp2 = fp2->next;
     }
     fp1 = fp1->next;
   }
 
-  cl->size = iter;
-
+  cl->size = count;
   return cl;
 }
 
+/**
+ * @brief Compare every fingerprint in first list against every fingerprint in second list
+ * @param fpl1 First fingerprint list
+ * @param fpl2 Second fingerprint list
+ * @param threshold Minimum similarity score to include in results
+ * @return Allocated compare_list_t containing all cross-matches above threshold, or NULL on error
+ * @note Performs full cross-product comparison (size1 * size2 comparisons)
+ * @note Caller must free returned structure with cl_free()
+ */
+compare_list_t *
+cl_fpl_vs_fpl(FINGERPRINT_LIST *fpl1, FINGERPRINT_LIST *fpl2, uint8_t threshold) {
+  if (!fpl1 || !fpl2 || fpl1->size == 0 || fpl2->size == 0)
+    return NULL;
+
+  compare_list_t *cl = malloc(sizeof(compare_list_t));
+  if (!cl)
+    return NULL;
+
+  // Maximum possible comparisons: size1 * size2
+  size_t max_size = fpl1->size * fpl2->size;
+  cl->list = calloc(max_size, sizeof(compare_t));
+  if (!cl->list) {
+    free(cl);
+    return NULL;
+  }
+
+  size_t count = 0;
+  FINGERPRINT *fp1 = fpl1->list;
+
+  while (fp1) {
+    FINGERPRINT *fp2 = fpl2->list;
+    while (fp2) {
+      uint8_t score = fp_compare(fp1, fp2);
+      if (score >= threshold) {
+        cl->list[count].name1 = fp1->file_name;
+        cl->list[count].name2 = fp2->file_name;
+        cl->list[count].score = score;
+        count++;
+      }
+      fp2 = fp2->next;
+    }
+    fp1 = fp1->next;
+  }
+
+  cl->size = count;
+  return cl;
+}
+
+/**
+ * @brief Compare one fingerprint against all fingerprints in a list
+ * @param target Single fingerprint to compare against the list
+ * @param fpl Fingerprint list to compare against
+ * @param threshold Minimum similarity score to include in results
+ * @return Allocated compare_list_t containing all matches above threshold, or NULL on error
+ * @note Target fingerprint appears as name1 in all results
+ * @note Caller must free returned structure with cl_free()
+ */
+compare_list_t *
+cl_fp_vs_fpl(FINGERPRINT *target, FINGERPRINT_LIST *fpl, uint8_t threshold) {
+  if (!target || !fpl || fpl->size == 0)
+    return NULL;
+
+  compare_list_t *cl = malloc(sizeof(compare_list_t));
+  if (!cl)
+    return NULL;
+
+  cl->list = calloc(fpl->size, sizeof(compare_t));
+  if (!cl->list) {
+    free(cl);
+    return NULL;
+  }
+
+  size_t count = 0;
+  FINGERPRINT *fp = fpl->list;
+
+  while (fp) {
+    uint8_t score = fp_compare(target, fp);
+    if (score >= threshold) {
+      cl->list[count].name1 = target->file_name;
+      cl->list[count].name2 = fp->file_name;
+      cl->list[count].score = score;
+      count++;
+    }
+    fp = fp->next;
+  }
+
+  cl->size = count;
+  return cl;
+}
+
+/**
+ * @brief Free memory allocated for compare_list_t structure
+ * @param cl Compare list to free
+ * @note Safe to call with NULL pointer
+ */
 void
 cl_free(compare_list_t *cl) {
   if (cl) {

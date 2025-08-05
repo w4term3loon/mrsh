@@ -4,7 +4,7 @@ HEADER=header/util.h header/hashing.h header/bloomfilter.h header/fingerprint.h 
 
 CMD_TARGET=src/main.c
 
-LIB_NAME=bindings/mrsh/libmrsh.so
+LIB_NAME=bindings/mrshw/libmrsh.so
 LIB_WRAPPER=bindings/glue/mrsh_glue.c
 
 all: debug
