@@ -1,20 +1,31 @@
-from setuptools import setup, find_packages
+"""
+Setup script for MRSHw package.
+"""
+
+from setuptools import setup
 import pathlib
 
 here = pathlib.Path(__file__).parent.resolve()
 
 setup(
     name="mrshw",
-    version="0.1.0b4",
+    version="0.1.0",
     author="w4term3loon",
     author_email="ifkovics.barnabas@gmail.com",
-    description="Python bindings for MRSH: a fast, modular similarity digest tool for malware analysis",
+    description="Python bindings for MRSHv2: a fast, modular similarity digest tool for malware analysis, forensics and much more",
     long_description=(here / "README.md").read_text(encoding="utf-8"),
     long_description_content_type="text/markdown",
-    packages=find_packages(),
-    package_data={
-        "mrshw": ["libmrsh.so"],
+    packages=["mrsh"],
+    package_dir={"mrsh": "mrshw"},
+    Opackage_data={
+        "mrsh": ["mrshw/libmrsh.so"],
     },
+    entry_points={
+        'console_scripts': [
+            'mrsh=mrsh.cli:main',
+        ],
+    },
+    url="https://github.com/w4term3loon/mrsh",
     include_package_data=True,
     classifiers=[
         "Programming Language :: Python :: 3",
@@ -33,7 +44,7 @@ setup(
         "Bug Tracker": "https://github.com/w4term3loon/mrsh/issues",
     },
     python_requires=">=3.7",
-    keywords="similarity hashing, malware detection, sdhash, tlsh, binary analysis, ctypes, python bindings",
+    keywords="binary, analysis, python, binding, malware, hashing, similarity, detection, security, digital, forensics",
     license_files=["LICENSE"]
 )
 

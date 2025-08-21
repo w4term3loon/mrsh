@@ -2,9 +2,6 @@
 
 Thin, ctypes-based Python bindings for the [mrsh CLI tool](https://github.com/w4term3loon/mrsh). Implements the Bloom-filter–based similarity hashing algorithm originally proposed by Frank Breitinger and Harald Baier in their paper Similarity Preserving Hashing: Eligible Properties and a new Algorithm MRSH-v2 (da/sec Biometrics and Internet Security Research Group, Hochschule Darmstadt). Use Bloom-filter–based fingerprinting directly from Python with minimal overhead.
 
-> [!IMPORTANT]
-> For a more complete api ducumentation please refer to [docs/api.md](./docs/api.md)
-
 ---
 
 ## Installation
@@ -15,10 +12,10 @@ Install from PyPI:
 pip install mrshw
 ```
 
-Or directly from GitHub (tagged release `v0.1.0b4`):
+Or directly from GitHub (tagged release `v0.1.0`):
 
 ```bash
-pip install git+https://github.com/w4term3loon/mrsh.git@v0.1.0b4
+pip install git+https://github.com/w4term3loon/mrsh.git@v0.1.0
 ```
 
 ---
@@ -26,31 +23,21 @@ pip install git+https://github.com/w4term3loon/mrsh.git@v0.1.0b4
 ## Quickstart
 
 ```python
-import mrshw as mrsh
+import mrsh
 
-# 1. Single-fingerprint API
-fp = mrsh.fp("path/to/file.bin")
-print(str(fp))            # raw metadata + hex-encoded Bloom filters
-print(fp.meta())          # Metadata(name, filesize, filter_count)
+# Generate hash
+hash_value = mrsh.hash("file.exe")
 
-# 2. Quick hash helper
-print(mrsh.hash("path/to/file.bin"))
+# Create and compare fingerprints
+fp1 = mrsh.Fingerprint("file1.exe")
+fp2 = mrsh.Fingerprint("file2.exe")
+similarity = fp1.compare(fp2)
 
-# 3. Fingerprint-list API
-fpl = mrsh.fpl()
-fpl += "a.bin"
-fpl += ("b.bin", "label_b")
-fpl += open('c.bin', 'rb').read()
-print(str(fpl))           # one line per fingerprint
-
-# 4. Compare two fingerprints
-cmp = mrsh.compare(fp, mrsh.fp("other.bin"))
-print(cmp.hash1, cmp.hash2, cmp.score)
-
-# 5. Compare all in a list
-results = fpl.compare_all(threshold=10)
-for comp in results:
-    print(comp.hash1, comp.hash2, comp.score)
+# Batch operations
+fpl = mrsh.FingerprintList()
+fpl.add("file1.exe")
+fpl.add("file2.exe")
+results = fpl.compare_all(threshold=50)
 ```
 
 ---
