@@ -6,7 +6,7 @@ import os
 import ctypes
 from collections import namedtuple
 from typing import Union, List, Tuple, Optional
-from pathlib import Path
+import importlib.resources
 
 
 class MRSHwException(Exception):
@@ -21,24 +21,23 @@ class MRSHwError(MRSHwException):
 
 # Load the shared library
 def _load_library():
-    """Load the MRSHw shared library."""
     lib_name = "libmrsh.so"
-
-    # Try different locations
-    possible_paths = [
-        os.path.join(os.path.dirname(__file__), lib_name),
-        os.path.join(os.path.dirname(__file__), "lib", lib_name),
-        lib_name  # System path
-    ]
-
-    for path in possible_paths:
-        try:
-            return ctypes.CDLL(path)
-        except OSError:
-            continue
-
+    try:
+        # Python 3.9+: returns a pathlib.Path
+        lib_path = importlib.resources.files(__package__).joinpath(lib_name)
+        return ctypes.CDLL(str(lib_path))
+    except Exception:
+        # Fallbacks if needed
+        for path in (
+            os.path.join(os.path.dirname(__file__), lib_name),
+            os.path.join(os.path.dirname(__file__), "lib", lib_name),
+            lib_name,
+        ):
+            try:
+                return ctypes.CDLL(path)
+            except OSError:
+                pass
     raise MRSHwError(f"Could not load {lib_name}. Please ensure it's installed correctly.")
-
 
 lib = _load_library()
 

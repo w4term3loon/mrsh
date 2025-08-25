@@ -12,10 +12,10 @@ Install from PyPI:
 pip install mrshw
 ```
 
-Or directly from GitHub (tagged release `v0.1.1`):
+Or directly from GitHub (tagged release `v0.1.2`):
 
 ```bash
-pip install git+https://github.com/w4term3loon/mrsh.git@v0.1.1
+pip install git+https://github.com/w4term3loon/mrsh.git@v0.1.2
 ```
 
 ---

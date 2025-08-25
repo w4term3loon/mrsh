@@ -9,16 +9,17 @@ here = pathlib.Path(__file__).parent.resolve()
 
 setup(
     name="mrshw",
-    version="0.1.1",
+    version="0.1.2",
     author="w4term3loon",
     author_email="ifkovics.barnabas@gmail.com",
     description="Python bindings for MRSHv2: a fast, modular similarity digest tool for malware analysis, forensics and much more",
     long_description=(here / "README.md").read_text(encoding="utf-8"),
     long_description_content_type="text/markdown",
     packages=["mrsh"],
+    include_package_data=True,
     package_dir={"mrsh": "mrshw"},
     package_data={
-        "mrsh": ["mrshw/libmrsh.so"],
+        "mrsh": ["libmrsh.so"],
     },
     entry_points={
         'console_scripts': [
@@ -26,7 +27,6 @@ setup(
         ],
     },
     url="https://github.com/w4term3loon/mrsh",
-    include_package_data=True,
     classifiers=[
         "Programming Language :: Python :: 3",
         "Programming Language :: C",
