@@ -17,7 +17,7 @@ setup(
     long_description_content_type="text/markdown",
     packages=["mrsh"],
     package_dir={"mrsh": "mrshw"},
-    Opackage_data={
+    package_data={
         "mrsh": ["mrshw/libmrsh.so"],
     },
     entry_points={
