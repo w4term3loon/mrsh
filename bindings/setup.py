@@ -9,7 +9,7 @@ here = pathlib.Path(__file__).parent.resolve()
 
 setup(
     name="mrshw",
-    version="0.1.0",
+    version="0.1.1",
     author="w4term3loon",
     author_email="ifkovics.barnabas@gmail.com",
     description="Python bindings for MRSHv2: a fast, modular similarity digest tool for malware analysis, forensics and much more",
