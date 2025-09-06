@@ -12,10 +12,10 @@ Install from PyPI:
 pip install mrshw
 ```
 
-Or directly from GitHub (tagged release `v0.1.2`):
+Or directly from GitHub (tagged release `v0.1.3`):
 
 ```bash
-pip install git+https://github.com/w4term3loon/mrsh.git@v0.1.2
+pip install git+https://github.com/w4term3loon/mrsh.git@v0.1.3
 ```
 
 ---
@@ -26,7 +26,9 @@ pip install git+https://github.com/w4term3loon/mrsh.git@v0.1.2
 import mrsh
 
 # Generate hash
-hash_value = mrsh.hash("file.exe")
+file_hash = mrsh.hash("file.exe")
+binary_hash = mrsh.hash((b"AAAAA", data_name))
+similarity_score = mrsh.diff(file_hash, binary_hash)
 
 # Create and compare fingerprints
 fp1 = mrsh.Fingerprint("file1.exe")

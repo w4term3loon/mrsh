@@ -31,10 +31,10 @@ init_modes(void) {
   mode->compare = false;
   mode->gen_compare = false;
   mode->compareLists = false;
-  mode->file_comparison = true;
+  mode->file_comparison = false;
   mode->helpmessage = false;
   mode->print = false;
-  mode->threshold = 1;
+  mode->threshold = 0;
   mode->recursive = false;
   mode->path_list_compare = false;
 }
@@ -595,7 +595,9 @@ cl_free(compare_list_t *cl) {
 void
 hex_to_bytes(const char *hex_str, unsigned char *bytes, int byte_count) {
   for (int i = 0; i < byte_count; i++) {
-    sscanf(hex_str + 2 * i, "%02X", (unsigned int *)&bytes[i]);
+    unsigned int temp; // Use a temporary variable of the correct type
+    sscanf(hex_str + 2 * i, "%02X", &temp);
+    bytes[i] = (unsigned char)temp; // Assign the value to the char array
   }
 }
 
@@ -603,82 +605,78 @@ hex_to_bytes(const char *hex_str, unsigned char *bytes, int byte_count) {
 // Format: "filename:filesize:number_of_filters:blocks_in_last_filter:HEXDATA"
 FINGERPRINT *
 parse_fingerprint_string(const char *fp_string) {
-  if (!fp_string)
+  if (!fp_string) {
     return NULL;
+  }
 
-  // Use your existing initialization function
   FINGERPRINT *fp = init_empty_fingerprint();
-  if (!fp)
-    return NULL;
+  if (!fp) {
+    return NULL; // Should not happen if init_empty_fingerprint exits on failure
+  }
 
-  // Make a copy of the string for parsing
   char *str_copy = strdup(fp_string);
   if (!str_copy) {
     fingerprint_destroy(fp);
     return NULL;
   }
 
-  // Parse header fields
-  char *token = strtok(str_copy, ":");
-  if (!token)
+  char *saveptr;
+  char *token;
+
+  // 1. Filename
+  if (!(token = strtok_r(str_copy, ":", &saveptr)))
     goto error;
   strncpy(fp->file_name, token, sizeof(fp->file_name) - 1);
+  fp->file_name[sizeof(fp->file_name) - 1] = '\0';
 
-  token = strtok(NULL, ":");
-  if (!token)
+  // 2. Filesize
+  if (!(token = strtok_r(NULL, ":", &saveptr)))
     goto error;
-  fp->filesize = (unsigned int)atoi(token);
+  fp->filesize = (unsigned int)strtoul(token, NULL, 10);
 
-  token = strtok(NULL, ":");
-  if (!token)
+  // 3. Amount of Bloom Filters
+  if (!(token = strtok_r(NULL, ":", &saveptr)))
     goto error;
-  fp->amount_of_BF = (unsigned int)atoi(token);
+  fp->amount_of_BF = (unsigned int)strtoul(token, NULL, 10) - 1;
 
-  token = strtok(NULL, ":");
-  if (!token)
+  // 4. Blocks in the last filter
+  if (!(token = strtok_r(NULL, ":", &saveptr)))
     goto error;
   int blocks_in_last_filter = atoi(token);
 
-  // Get hex data
-  token = strtok(NULL, ":");
-  if (!token)
+  // 5. Hex Data
+  if (!(token = strtok_r(NULL, "", &saveptr)))
+    goto error; // Read the rest of the string
+
+  // Check if there is enough hex data for the declared number of filters
+  size_t required_len = ((size_t)fp->amount_of_BF + 1) * FILTERSIZE * 2;
+  if (strlen(token) < required_len) {
     goto error;
+  }
 
-  // Create bloom filters from hex data
-  int total_filters = fp->amount_of_BF + 1;
-  int hex_pos = 0;
-  BLOOMFILTER *prev_bf = NULL;
+  BLOOMFILTER *current_bf = NULL;
+  for (unsigned int i = 0; i <= fp->amount_of_BF; i++) {
+    if (i == 0) {
+      current_bf = fp->bf_list;
+    } else {
+      // Allocate new filters for the rest of the list
+      current_bf = (BLOOMFILTER *)calloc(1, sizeof(BLOOMFILTER));
+      if (!current_bf)
+        goto error;
+      // Link it to the previous one
+      fp->bf_list_last_element->next = current_bf;
+      fp->bf_list_last_element = current_bf;
+    }
 
-  for (int i = 0; i < total_filters; i++) {
-    // Allocate bloom filter
-    BLOOMFILTER *bf = (BLOOMFILTER *)calloc(1, sizeof(BLOOMFILTER));
-    if (!bf)
-      goto error;
+    // Convert hex data for the current filter
+    hex_to_bytes(token + (i * FILTERSIZE * 2), current_bf->array, FILTERSIZE);
 
-    // Convert hex data directly into the bloom filter array
-    // (assuming bf->array is a fixed-size array, not a pointer)
-    hex_to_bytes(token + hex_pos, bf->array, FILTERSIZE);
-    hex_pos += FILTERSIZE * 2; // 2 hex chars per byte
-
-    // Set block count
+    // Assign block count
     if (i == fp->amount_of_BF) {
-      // This is the last filter (at index amount_of_BF)
-      bf->amount_of_blocks = blocks_in_last_filter;
-      fp->bf_list_last_element = bf;
+      current_bf->amount_of_blocks = blocks_in_last_filter;
     } else {
-      // For non-last filters, we need to estimate block count
-      // Since this info isn't in the string format, use a safe default
-      bf->amount_of_blocks = MINBLOCKS + 10; // Safe assumption
+      current_bf->amount_of_blocks = MAXBLOCKS; // Assumes full filter
     }
-
-    // Link the bloom filters
-    bf->next = NULL;
-    if (prev_bf) {
-      prev_bf->next = bf;
-    } else {
-      fp->bf_list = bf; // First filter
-    }
-    prev_bf = bf;
   }
 
   free(str_copy);
@@ -695,27 +693,24 @@ error:
 int
 str_compare(const char *fp_string1, const char *fp_string2) {
   if (!fp_string1 || !fp_string2) {
-    return 0;
+    return 0; // Invalid input
   }
 
-  // Parse both fingerprint strings using existing functions
   FINGERPRINT *fp1 = parse_fingerprint_string(fp_string1);
   FINGERPRINT *fp2 = parse_fingerprint_string(fp_string2);
 
-  if (!fp1 || !fp2) {
-    if (fp1)
-      fingerprint_destroy(fp1);
-    if (fp2)
-      fingerprint_destroy(fp2);
-    return 0;
+  int score = 0;
+  // Only perform comparison if both fingerprints were parsed successfully
+  if (fp1 && fp2) {
+    score = fingerprint_compare(fp1, fp2);
   }
 
-  // Use your existing comparison function
-  int score = fingerprint_compare(fp1, fp2);
-
-  // Clean up using your existing destroy function
-  fingerprint_destroy(fp1);
-  fingerprint_destroy(fp2);
+  if (fp1) {
+    fingerprint_destroy(fp1);
+  }
+  if (fp2) {
+    fingerprint_destroy(fp2);
+  }
 
   return score;
 }

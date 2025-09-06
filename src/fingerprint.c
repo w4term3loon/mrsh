@@ -94,7 +94,7 @@ void add_new_bloomfilter(FINGERPRINT *fp, BLOOMFILTER *bf){
 	} else {
 		fp->bf_list_last_element->next = bf;
 		fp->bf_list_last_element = bf;
-		fp->amount_of_BF++;
+    fp->amount_of_BF++;
 	}
 }
 
@@ -232,7 +232,7 @@ void print_fingerprint(FINGERPRINT *fp){
     BLOOMFILTER *bf = fp->bf_list;
 
     /* FORMAT: filename:filesize:number of filters:blocks in last filter*/
-    printf("%s:%d:%d:%d", fp->file_name, fp->filesize, fp->amount_of_BF, fp->bf_list_last_element->amount_of_blocks);
+    printf("%s:%d:%d:%d", fp->file_name, fp->filesize, fp->amount_of_BF+1, fp->bf_list_last_element->amount_of_blocks);
     printf(":");
 
     while(bf != NULL) {

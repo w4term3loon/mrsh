@@ -496,4 +496,9 @@ def diff(hash1: str, hash2: str) -> int:
     Returns:
         Difference score
     """
-    return lib.str_compare(hash1.encode(), hash2.encode())
+    # Create byte objects and assign them to variables
+    # This keeps them alive until the function returns
+    hash1_bytes = hash1.encode()
+    hash2_bytes = hash2.encode()
+
+    return lib.str_compare(hash1_bytes, hash2_bytes)
