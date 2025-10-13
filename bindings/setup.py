@@ -2,17 +2,24 @@
 Setup script for MRSHw package.
 """
 
-from setuptools import setup
+import sys
 import pathlib
+from setuptools import setup
 
 here = pathlib.Path(__file__).parent.resolve()
 
+# block installation on non-Linux systems
+if not sys.platform.startswith("linux"):
+    raise RuntimeError(
+        f"mrshw requires a Linux environment and does not support '{sys.platform}'."
+    )
+
 setup(
     name="mrshw",
-    version="0.1.3",
+    version="1.0.0",
     author="w4term3loon",
     author_email="ifkovics.barnabas@gmail.com",
-    description="Python bindings for MRSHv2: a fast, modular similarity digest tool for malware analysis, forensics and much more",
+    description="Python bindings for MRSHv2: modular similarity digest tool for malware analysis, forensics and much more",
     long_description=(here / "README.md").read_text(encoding="utf-8"),
     long_description_content_type="text/markdown",
     packages=["mrsh"],

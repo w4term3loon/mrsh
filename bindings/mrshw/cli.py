@@ -1,11 +1,11 @@
 """
-Command-line interface for MRSHw.
+CLI for MRSHw, to eliminate the need for a separate command line tool install.
 """
 
 import argparse
 import sys
 from pathlib import Path
-from . import hash, compare, __version__
+from . import hash, __version__
 from .utils import scan_directory
 
 

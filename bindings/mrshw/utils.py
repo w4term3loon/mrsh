@@ -2,14 +2,13 @@
 Utility functions for MRSHw operations.
 """
 
-import os
 from pathlib import Path
-from typing import List, Union, Generator
+from typing import List, Union
 from .core import FingerprintList
 
 
 def scan_directory(directory: Union[str, Path],
-                  extensions: List[str] = None,
+                  extensions: List[str] = [],
                   recursive: bool = True) -> FingerprintList:
     """
     Scan a directory and create fingerprints for all files.

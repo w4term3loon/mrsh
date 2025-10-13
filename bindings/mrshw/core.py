@@ -103,7 +103,8 @@ def _setup_library_functions():
     lib.fp_add_file.argtypes = [ctypes.POINTER(_CFingerprint), ctypes.c_char_p, ctypes.c_char_p]
 
     lib.fp_add_bytes.restype = ctypes.c_int32
-    lib.fp_add_bytes.argtypes = [ctypes.POINTER(_CFingerprint), ctypes.c_char_p, ctypes.c_ulong, ctypes.c_char_p]
+    lib.fp_add_bytes.argtypes = [ctypes.POINTER(_CFingerprint), ctypes.c_char_p, ctypes.c_ulong,
+                                 ctypes.c_char_p]
 
     lib.fp_compare.restype = ctypes.c_uint8
     lib.fp_compare.argtypes = [ctypes.POINTER(_CFingerprint), ctypes.POINTER(_CFingerprint)]
@@ -119,10 +120,12 @@ def _setup_library_functions():
     lib.fpl_destroy.argtypes = [ctypes.POINTER(_CFingerprintList)]
 
     lib.fpl_add_path.restype = ctypes.c_int32
-    lib.fpl_add_path.argtypes = [ctypes.POINTER(_CFingerprintList), ctypes.c_char_p, ctypes.c_char_p]
+    lib.fpl_add_path.argtypes = [ctypes.POINTER(_CFingerprintList), ctypes.c_char_p,
+                                 ctypes.c_char_p]
 
     lib.fpl_add_bytes.restype = ctypes.c_int32
-    lib.fpl_add_bytes.argtypes = [ctypes.POINTER(_CFingerprintList), ctypes.c_char_p, ctypes.c_ulong, ctypes.c_char_p]
+    lib.fpl_add_bytes.argtypes = [ctypes.POINTER(_CFingerprintList), ctypes.c_char_p,
+                                  ctypes.c_ulong, ctypes.c_char_p]
 
     lib.fpl_str.restype = ctypes.c_void_p
     lib.fpl_str.argtypes = [ctypes.POINTER(_CFingerprintList)]
@@ -132,10 +135,12 @@ def _setup_library_functions():
     lib.cl_fpl_all.argtypes = [ctypes.POINTER(_CFingerprintList), ctypes.c_uint8]
 
     lib.cl_fpl_vs_fpl.restype = ctypes.POINTER(_CCompareList)
-    lib.cl_fpl_vs_fpl.argtypes = [ctypes.POINTER(_CFingerprintList), ctypes.POINTER(_CFingerprintList), ctypes.c_uint8]
+    lib.cl_fpl_vs_fpl.argtypes = [ctypes.POINTER(_CFingerprintList),
+                                  ctypes.POINTER(_CFingerprintList), ctypes.c_uint8]
 
     lib.cl_fp_vs_fpl.restype = ctypes.POINTER(_CCompareList)
-    lib.cl_fp_vs_fpl.argtypes = [ctypes.POINTER(_CFingerprint), ctypes.POINTER(_CFingerprintList), ctypes.c_uint8]
+    lib.cl_fp_vs_fpl.argtypes = [ctypes.POINTER(_CFingerprint), ctypes.POINTER(_CFingerprintList),
+                                 ctypes.c_uint8]
 
     lib.cl_free.restype = None
     lib.cl_free.argtypes = [ctypes.POINTER(_CCompareList)]
@@ -148,6 +153,7 @@ def _setup_library_functions():
     lib.str_compare.argtypes = [ctypes.c_char_p, ctypes.c_char_p]
 
 
+# Set signatures
 _setup_library_functions()
 
 
@@ -318,7 +324,8 @@ class FingerprintList:
         results = fpl.compare_all(threshold=50)
     """
 
-    def __init__(self, data: Optional[Union[str, bytes, List, Tuple[Union[str, bytes], str]]] = None):
+    def __init__(self, data: Optional[Union[str, bytes, List,
+                 Tuple[Union[str, bytes], str]]] = None):
         """
         Initialize a new fingerprint list.
 
@@ -337,7 +344,8 @@ class FingerprintList:
         if hasattr(self, '_fpl') and self._fpl:
             lib.fpl_destroy(self._fpl)
 
-    def add(self, data: Union[str, bytes, List, Tuple[Union[str, bytes], str]]) -> 'FingerprintList':
+    def add(self, data: Union[str, bytes, List,
+            Tuple[Union[str, bytes], str]]) -> 'FingerprintList':
         """
         Add data to the fingerprint list.
 
@@ -410,7 +418,8 @@ class FingerprintList:
             if cl_ptr:
                 lib.cl_free(cl_ptr)
 
-    def compare_with(self, other: Union['Fingerprint', 'FingerprintList'], threshold: int = 0) -> List[Comparison]:
+    def compare_with(self, other: Union['Fingerprint', 'FingerprintList'],
+                     threshold: int = 0) -> List[Comparison]:
         """
         Compare this fingerprint list with another fingerprint or list.
 
@@ -437,7 +446,7 @@ class FingerprintList:
                 lib.cl_free(cl_ptr)
 
 
-# Convenience functions (similar to TLSH's hash() function)
+# Convenience functions
 def hash(data: Union[str, bytes, Tuple[Union[str, bytes], str]]) -> str:
     """
     Generate MRSHw hash for data.
@@ -480,7 +489,8 @@ def compare(entity1: Union[Fingerprint, FingerprintList, str],
         if isinstance(entity2, FingerprintList):
             return entity2.compare_with(entity1, threshold)
     elif isinstance(entity1, FingerprintList):
-        return entity1.compare_with(entity2, threshold)
+        if not isinstance(entity2, str):
+            return entity1.compare_with(entity2, threshold)
 
     raise TypeError("Unsupported comparison types")
 

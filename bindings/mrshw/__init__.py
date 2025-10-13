@@ -5,9 +5,9 @@ A Python wrapper for the MRSHv2 C library providing similarity hashing
 functionality for malware detection and file comparison.
 """
 
-__version__ = "0.1.3"
+__version__ = "1.0.0"
 __author__ = "w4term3loon"
-__email__ = "ifkovics.barnabas@example.com"
+__email__ = "ifkovics.barnabas@gmail.com"
 
 from .core import (
     Fingerprint,
