@@ -1,257 +1,508 @@
-/**
- * AUTHOR: Frank Breitinger
- * DATE: April 2013
- * Email: Frank.Breitinger@cased.de
- */
-#include <stdio.h>
-#include "../header/config.h"
+#include <inttypes.h>
+#include <math.h>
+#include <stdlib.h>
+#include <string.h>
+
 #include "../header/fingerprint.h"
-#include "../header/helper.h"
+#include "../header/hashing.h"
 
+static size_t bounded_name_length(const char *name)
+{
+    size_t length = 0U;
 
-
-
-/**
- * Initializes an empty Fingerprint
- */
-FINGERPRINT *init_empty_fingerprint(){
-	FINGERPRINT *fp;
-
-	if (!(fp=(FINGERPRINT *)malloc(sizeof(FINGERPRINT)))) {
-        fprintf(stderr,"[*] Error in initializing bloom_read \n");
-        exit(-1);
+    if (name == NULL) {
+        return FINGERPRINT_NAME_MAX;
     }
-
-    fp->amount_of_BF       = 0;
-    fp->bf_list = init_empty_BF();
-    fp->bf_list_last_element = fp->bf_list;
-    fp->next = NULL;
-    return fp;
+    while (length < FINGERPRINT_NAME_MAX && name[length] != '\0') {
+        ++length;
+    }
+    return length;
 }
 
+FINGERPRINT *init_empty_fingerprint(void)
+{
+    FINGERPRINT *fingerprint = calloc(1U, sizeof(FINGERPRINT));
 
-/**
- * Creates a Fingerprint for a File (sets filename and filezite)
- * returns NULL if it is not able to create the bloom filter,
- * else the allocated FINGERPRINT struct
- * */
-FINGERPRINT *init_fingerprint_for_file(FILE *handle, char *filename) {
-    FINGERPRINT *fp = init_empty_fingerprint();
-
-    fp->filesize = find_file_size(handle);
-
-    strcpy(fp->file_name , filename);
-
-    hashFileToFingerprint(fp, handle);
-
-    fclose(handle);
-
-    return fp;
+    if (fingerprint == NULL) {
+        return NULL;
+    }
+    fingerprint->bf_list = init_empty_BF();
+    if (fingerprint->bf_list == NULL) {
+        free(fingerprint);
+        return NULL;
+    }
+    fingerprint->file_name = calloc(1U, 1U);
+    if (fingerprint->file_name == NULL) {
+        destroy_bf(fingerprint->bf_list);
+        free(fingerprint);
+        return NULL;
+    }
+    fingerprint->bf_list_last_element = fingerprint->bf_list;
+    return fingerprint;
 }
 
+int fingerprint_set_name_n(FINGERPRINT *fp, const char *name, size_t length)
+{
+    char *copy;
+    size_t index;
 
-/*
- *  Destroys all filters and sets all memory free
- */
-int fingerprint_destroy(FINGERPRINT *fp) {
-	BLOOMFILTER *tmp, *node = fp->bf_list;	//start at the head.
-    while(node != NULL){					//traverse entire list.
-    	tmp = node;							//save node pointer
-    	node = node->next;					//advance to next.
-    	free(tmp);							//free the saved one.
+    if (fp == NULL || name == NULL) {
+        return MRSH_ERR_INVALID;
     }
-    fp->bf_list = NULL;						//finally, mark as empty list.
-    fp->bf_list_last_element = NULL;
-
-	free(fp);
-    fp=NULL;
-    return 0;
-}
-
-
-/*
- * Adds a block-hash to the fingerprint
- */
-void add_hash_to_fingerprint(FINGERPRINT *fp, uint64 hash_value){
-	BLOOMFILTER *lastBF = fp->bf_list_last_element;
-
-	//if MAXBLOCKS are within a Bloom filter than create a new one
-	if(lastBF->amount_of_blocks == MAXBLOCKS){
-		BLOOMFILTER *bf = init_empty_BF();
-		add_new_bloomfilter(fp, bf);
-		lastBF = bf;
-	}
-
-	add_hash_to_bloomfilter(lastBF, hash_value);
-}
-
-
-//Adds a new last Bloom filter
-void add_new_bloomfilter(FINGERPRINT *fp, BLOOMFILTER *bf){
-	if(fp->bf_list==NULL) {
-		fp->bf_list = bf;
-		fp->bf_list_last_element = bf;
-	} else {
-		fp->bf_list_last_element->next = bf;
-		fp->bf_list_last_element = bf;
-    fp->amount_of_BF++;
-	}
-}
-
-
-// Compares two fingerprints and returns a match-score between 0 and 100
-int fingerprint_compare(FINGERPRINT *fingerprint1, FINGERPRINT *fingerprint2) {
-
-    int final_score = 0;
-    int i, amount_of_BF;
-
-    FINGERPRINT *larger_fingerprint = fingerprint1;
-    FINGERPRINT *smaller_fingerprint = fingerprint2;
-
-
-    //Smaller fingerprint needs to be identified to generate the correct match score
-    if(fingerprint1->amount_of_BF < fingerprint2->amount_of_BF) {
-        larger_fingerprint = fingerprint2;
-        smaller_fingerprint = fingerprint1;
+    if (length >= FINGERPRINT_NAME_MAX) {
+        return MRSH_ERR_RANGE;
     }
-
-
-    //In case of file-comparsion we need the bigger value
-    if(mode->file_comparison){
-    	amount_of_BF =larger_fingerprint->amount_of_BF+1;
-    	if(larger_fingerprint->bf_list_last_element->amount_of_blocks < MINBLOCKS)
-    		amount_of_BF--;
+    if (memchr(name, '\0', length) != NULL) {
+        return MRSH_ERR_FORMAT;
     }
-
-    else {
-    	amount_of_BF = smaller_fingerprint->amount_of_BF+1;
-    	if(smaller_fingerprint->bf_list_last_element->amount_of_blocks < MINBLOCKS)
-    			amount_of_BF--;
-    }
-
-    //if the last filter has less than MINBLOCKS elements, it should not influence the final score
-    //if(smaller_fingerprint->bf_list_last_element->amount_of_blocks < MINBLOCKS ||
-    	//	larger_fingerprint->bf_list_last_element->amount_of_blocks < MINBLOCKS)
-    	//amount_of_BF--;
-
-
-    //run through all bloom filters of the smaller fingerprint and compare them
-    //to all fingerprints of the large one
-    BLOOMFILTER *bf = smaller_fingerprint->bf_list;
-    for(i=0;i<=smaller_fingerprint->amount_of_BF;i++) {
-    	if(bf->amount_of_blocks < MINBLOCKS) 	//there is no sense in comparing Bloom filters having less than 6 Blocks
-    		break;
-    	final_score += bloom_max_score(bf, larger_fingerprint);        //final_score += bloom_max_score(filter_ptr[i], bloom_less_elements->count_added_blocks[i], bloom_more_elements);
-    	bf = bf->next;
-    }
-
-
-    //generate the score
-    if(amount_of_BF < 1)
-    	return 0;
-    return final_score/amount_of_BF;
-
-}
-
-
-
-
-int bloom_max_score(BLOOMFILTER *bf, FINGERPRINT *fingerprint) {
-    int    C, i, e_min, e_max;
-    int tmp_score = 0;
-    int score     = 0;
-
-    int bitsSetOfBF1 = count_bits_set_to_one_of_BF(bf->array);
-
-
-    BLOOMFILTER *tmp_bf = fingerprint->bf_list;
-
-    e_min = compute_e_min(bf->amount_of_blocks, tmp_bf->amount_of_blocks);
-
-    for(i=0;i<=fingerprint->amount_of_BF;i++) {
-
-    	//Filters with 6 or less elements are critical
-    	if(tmp_bf->amount_of_blocks < MINBLOCKS){
-    		//if(i > 0 || (mode->ignoreSmallInputs)) //&& bf->amount_of_blocks > 40))
-    				return score;
-    	}
-
-    	//for the last Bloom filter we have to update the values
-       	if(tmp_bf->next == NULL) {
-           	e_min = compute_e_min(tmp_bf->amount_of_blocks, bf->amount_of_blocks);
+    for (index = 0U; index < length; ++index) {
+        unsigned char byte = (unsigned char)name[index];
+        if (byte < 0x20U || byte == 0x7fU) {
+            return MRSH_ERR_FORMAT;
         }
-
-       	e_max = MIN(bitsSetOfBF1, count_bits_set_to_one_of_BF(tmp_bf->array));
-   	    C = 0.3*(e_max - e_min)+e_min;
-
-
-
-
-       	//compute bits in common
-        unsigned int numofbitsInCommon = bloom_common_bits(tmp_bf->array, bf->array);
-
-      	 if(numofbitsInCommon > C)
-      		 printf("");
-
-        //if they are high enough we have a threshold
-        if(numofbitsInCommon < C) {
-            tmp_score = 0;
-        } else {
-        	if ((e_max - C) >= 1)
-        		tmp_score = 100*(numofbitsInCommon-C)/(e_max-C);
-        }
-
-        if(score < tmp_score){
-            score = tmp_score;
-            if(score == 100)
-            	break;
-        }
-
-        tmp_bf = tmp_bf->next;
     }
-    return score;
-}
 
-
-double compute_e_min(int blocks_in_bf1, int blocks_in_bf2){
-	int b1 = blocks_in_bf1;
-	int b2 = blocks_in_bf2;
-
-	double tmp1 = pow(PROBABILITY, SUBHASHES*b1);
-	double tmp2 = pow(PROBABILITY, SUBHASHES*b2);
-	double tmp3 = pow(PROBABILITY, SUBHASHES*(b1+b2));
-
-	return BLOOMFILTERBITSIZE*(1 - tmp1 - tmp2 + tmp3);
-	//return BLOOMFILTERBITSIZE * (1-pow(bloom->probability,5*blocks)-pow(bloom->probability,5*blocks)+pow(tmp_bf->probability,5*(blocks+tmp_bf->count_added_blocks[i])))
-}
-
-
-
-void print_fingerprint(FINGERPRINT *fp){
-    int j;
-    BLOOMFILTER *bf = fp->bf_list;
-
-    /* FORMAT: filename:filesize:number of filters:blocks in last filter*/
-    printf("%s:%d:%d:%d", fp->file_name, fp->filesize, fp->amount_of_BF+1, fp->bf_list_last_element->amount_of_blocks);
-    printf(":");
-
-    while(bf != NULL) {
-    	//Print each Bloom filter as a 2-digit-hex value
-    	for(j=0;j<FILTERSIZE;j++)
-        	printf("%02X", bf->array[j]);
-
-       //move to next Bloom filter
-       bf = bf->next;
+    copy = malloc(length + 1U);
+    if (copy == NULL) {
+        return MRSH_ERR_NOMEM;
     }
-    printf("\n\n");
-
+    memcpy(copy, name, length);
+    copy[length] = '\0';
+    free(fp->file_name);
+    fp->file_name = copy;
+    return MRSH_OK;
 }
 
+int fingerprint_set_name(FINGERPRINT *fp, const char *name)
+{
+    size_t length;
 
+    if (name == NULL) {
+        return MRSH_ERR_INVALID;
+    }
+    length = bounded_name_length(name);
+    if (length >= FINGERPRINT_NAME_MAX) {
+        return MRSH_ERR_RANGE;
+    }
+    return fingerprint_set_name_n(fp, name, length);
+}
 
+FINGERPRINT *init_fingerprint_for_file(FILE *handle, const char *filename)
+{
+    FINGERPRINT *fingerprint;
+    int status;
 
+    if (handle == NULL || filename == NULL) {
+        if (handle != NULL) {
+            (void)fclose(handle);
+        }
+        return NULL;
+    }
 
+    fingerprint = init_empty_fingerprint();
+    if (fingerprint == NULL) {
+        (void)fclose(handle);
+        return NULL;
+    }
 
+    status = fingerprint_set_name(fingerprint, filename);
+    if (status == MRSH_OK) {
+        status = hashFileToFingerprint(fingerprint, handle);
+    }
+    if (fclose(handle) != 0 && status == MRSH_OK) {
+        status = MRSH_ERR_IO;
+    }
+    if (status != MRSH_OK) {
+        (void)fingerprint_destroy(fingerprint);
+        return NULL;
+    }
+    return fingerprint;
+}
 
+int fingerprint_destroy(FINGERPRINT *fp)
+{
+    BLOOMFILTER *node;
 
+    if (fp == NULL) {
+        return MRSH_OK;
+    }
 
+    node = fp->bf_list;
+    while (node != NULL) {
+        BLOOMFILTER *next = node->next;
+        destroy_bf(node);
+        node = next;
+    }
+    free(fp->file_name);
+    free(fp);
+    return MRSH_OK;
+}
+
+static int fingerprint_filter_count_checked(const FINGERPRINT *fp,
+                                            size_t *count_out)
+{
+    const BLOOMFILTER *node;
+    const BLOOMFILTER *last = NULL;
+    size_t count = 0U;
+
+    if (fp == NULL || count_out == NULL || fp->bf_list == NULL ||
+        fp->bf_list_last_element == NULL || fp->file_name == NULL ||
+        bounded_name_length(fp->file_name) >= FINGERPRINT_NAME_MAX) {
+        return MRSH_ERR_INVALID;
+    }
+    for (node = fp->bf_list; node != NULL; node = node->next) {
+        if (count >= MAX_FILTER) {
+            return MRSH_ERR_RANGE;
+        }
+        if (node->amount_of_blocks > MAXBLOCKS) {
+            return MRSH_ERR_INVALID;
+        }
+        ++count;
+        last = node;
+    }
+    if (last != fp->bf_list_last_element || count == 0U ||
+        fp->amount_of_BF != (uint32_t)(count - 1U)) {
+        return MRSH_ERR_INVALID;
+    }
+    *count_out = count;
+    return MRSH_OK;
+}
+
+size_t fingerprint_filter_count(const FINGERPRINT *fp)
+{
+    size_t count = 0U;
+
+    return fingerprint_filter_count_checked(fp, &count) == MRSH_OK ? count : 0U;
+}
+
+int fingerprint_comparison_work(const FINGERPRINT *fingerprint1,
+                                const FINGERPRINT *fingerprint2,
+                                uint64_t *work_out)
+{
+    size_t first_count;
+    size_t second_count;
+    uint64_t work;
+    int status;
+
+    if (work_out == NULL) {
+        return MRSH_ERR_INVALID;
+    }
+    *work_out = 0U;
+    status = fingerprint_filter_count_checked(fingerprint1, &first_count);
+    if (status != MRSH_OK) {
+        return status;
+    }
+    status = fingerprint_filter_count_checked(fingerprint2, &second_count);
+    if (status != MRSH_OK) {
+        return status;
+    }
+    if ((uint64_t)first_count > UINT64_MAX / (uint64_t)second_count) {
+        return MRSH_ERR_RANGE;
+    }
+    work = (uint64_t)first_count * (uint64_t)second_count;
+    if (work > MRSH_MAX_BLOOM_COMPARISON_WORK) {
+        return MRSH_ERR_RANGE;
+    }
+    *work_out = work;
+    return MRSH_OK;
+}
+
+int add_new_bloomfilter(FINGERPRINT *fp, BLOOMFILTER *bf)
+{
+    if (fp == NULL || bf == NULL || bf->next != NULL) {
+        return MRSH_ERR_INVALID;
+    }
+
+    if (fp->bf_list == NULL) {
+        fp->bf_list = bf;
+        fp->bf_list_last_element = bf;
+        fp->amount_of_BF = 0U;
+        return MRSH_OK;
+    }
+    if (fp->bf_list_last_element == NULL) {
+        return MRSH_ERR_INVALID;
+    }
+    if (fp->amount_of_BF >= MAX_FILTER - 1U) {
+        return MRSH_ERR_RANGE;
+    }
+
+    fp->bf_list_last_element->next = bf;
+    fp->bf_list_last_element = bf;
+    ++fp->amount_of_BF;
+    return MRSH_OK;
+}
+
+int add_hash_to_fingerprint(FINGERPRINT *fp, uint64 hash_value)
+{
+    BLOOMFILTER *last_filter;
+
+    if (fp == NULL || fp->bf_list_last_element == NULL) {
+        return MRSH_ERR_INVALID;
+    }
+    last_filter = fp->bf_list_last_element;
+
+    if (last_filter->amount_of_blocks >= MAXBLOCKS) {
+        BLOOMFILTER *new_filter = init_empty_BF();
+        int status;
+
+        if (new_filter == NULL) {
+            return MRSH_ERR_NOMEM;
+        }
+        status = add_new_bloomfilter(fp, new_filter);
+        if (status != MRSH_OK) {
+            destroy_bf(new_filter);
+            return status;
+        }
+        last_filter = new_filter;
+    }
+    return add_hash_to_bloomfilter(last_filter, hash_value);
+}
+
+FINGERPRINT *fingerprint_clone(const FINGERPRINT *source)
+{
+    FINGERPRINT *copy;
+    const BLOOMFILTER *source_filter;
+    BLOOMFILTER *destination_filter;
+    size_t filter_index = 0U;
+
+    if (source == NULL || source->bf_list == NULL || source->file_name == NULL) {
+        return NULL;
+    }
+
+    copy = init_empty_fingerprint();
+    if (copy == NULL) {
+        return NULL;
+    }
+    if (fingerprint_set_name(copy, source->file_name) != MRSH_OK) {
+        (void)fingerprint_destroy(copy);
+        return NULL;
+    }
+    copy->filesize = source->filesize;
+    destination_filter = copy->bf_list;
+
+    for (source_filter = source->bf_list; source_filter != NULL;
+         source_filter = source_filter->next) {
+        if (filter_index >= MAX_FILTER) {
+            (void)fingerprint_destroy(copy);
+            return NULL;
+        }
+        if (filter_index != 0U) {
+            destination_filter = init_empty_BF();
+            if (destination_filter == NULL ||
+                add_new_bloomfilter(copy, destination_filter) != MRSH_OK) {
+                destroy_bf(destination_filter);
+                (void)fingerprint_destroy(copy);
+                return NULL;
+            }
+        }
+        memcpy(destination_filter->array, source_filter->array,
+               sizeof(destination_filter->array));
+        destination_filter->amount_of_blocks = source_filter->amount_of_blocks;
+        ++filter_index;
+    }
+    return copy;
+}
+
+static size_t comparable_filter_count(const FINGERPRINT *fingerprint)
+{
+    const BLOOMFILTER *filter;
+    size_t count = 0U;
+
+    if (fingerprint == NULL) {
+        return 0U;
+    }
+    for (filter = fingerprint->bf_list; filter != NULL; filter = filter->next) {
+        if (filter->amount_of_blocks < MINBLOCKS) {
+            break;
+        }
+        ++count;
+    }
+    return count;
+}
+
+static bool fingerprint_content_equal(const FINGERPRINT *first,
+                                      const FINGERPRINT *second)
+{
+    const BLOOMFILTER *first_filter;
+    const BLOOMFILTER *second_filter;
+
+    if (first->filesize != second->filesize) {
+        return false;
+    }
+    first_filter = first->bf_list;
+    second_filter = second->bf_list;
+    while (first_filter != NULL && second_filter != NULL) {
+        if (first_filter->amount_of_blocks != second_filter->amount_of_blocks ||
+            memcmp(first_filter->array, second_filter->array,
+                   sizeof(first_filter->array)) != 0) {
+            return false;
+        }
+        first_filter = first_filter->next;
+        second_filter = second_filter->next;
+    }
+    return first_filter == NULL && second_filter == NULL;
+}
+
+int fingerprint_compare(const FINGERPRINT *fingerprint1,
+                        const FINGERPRINT *fingerprint2)
+{
+    const FINGERPRINT *larger;
+    const FINGERPRINT *smaller;
+    const BLOOMFILTER *filter;
+    size_t first_count;
+    size_t second_count;
+    size_t denominator;
+    uint64_t comparison_work;
+    int status;
+    int total_score = 0;
+
+    status = fingerprint_comparison_work(fingerprint1, fingerprint2,
+                                         &comparison_work);
+    if (status != MRSH_OK) {
+        return status;
+    }
+    (void)comparison_work;
+    if (fingerprint_content_equal(fingerprint1, fingerprint2)) {
+        return 100;
+    }
+
+    first_count = fingerprint_filter_count(fingerprint1);
+    second_count = fingerprint_filter_count(fingerprint2);
+    if (first_count >= second_count) {
+        larger = fingerprint1;
+        smaller = fingerprint2;
+    } else {
+        larger = fingerprint2;
+        smaller = fingerprint1;
+    }
+
+    if (mode != NULL && mode->file_comparison) {
+        denominator = comparable_filter_count(larger);
+    } else {
+        denominator = comparable_filter_count(smaller);
+    }
+    if (denominator == 0U) {
+        return 0;
+    }
+
+    for (filter = smaller->bf_list; filter != NULL; filter = filter->next) {
+        if (filter->amount_of_blocks < MINBLOCKS) {
+            break;
+        }
+        int score = bloom_max_score(filter, larger);
+        if (score < 0) {
+            return score;
+        }
+        total_score += score;
+    }
+    return total_score / (int)denominator;
+}
+
+int bloom_max_score(const BLOOMFILTER *bf, const FINGERPRINT *fingerprint)
+{
+    const BLOOMFILTER *candidate;
+    size_t filter_count;
+    int status;
+    int best_score = 0;
+    int bits_in_first;
+
+    if (bf == NULL || bf->amount_of_blocks > MAXBLOCKS) {
+        return MRSH_ERR_INVALID;
+    }
+    status = fingerprint_filter_count_checked(fingerprint, &filter_count);
+    if (status != MRSH_OK) {
+        return status;
+    }
+    (void)filter_count;
+    bits_in_first = (int)count_bits_set_to_one_of_BF(bf->array);
+
+    for (candidate = fingerprint->bf_list; candidate != NULL;
+         candidate = candidate->next) {
+        int expected_minimum;
+        int maximum;
+        int threshold;
+        int common;
+        int score = 0;
+
+        if (candidate->amount_of_blocks < MINBLOCKS) {
+            break;
+        }
+        expected_minimum = (int)compute_e_min(
+            bf->amount_of_blocks, candidate->amount_of_blocks);
+        maximum = MIN(bits_in_first,
+                      (int)count_bits_set_to_one_of_BF(candidate->array));
+        threshold = (int)(0.3 * (double)(maximum - expected_minimum) +
+                          (double)expected_minimum);
+        common = (int)bloom_common_bits(candidate->array, bf->array);
+
+        if (common >= threshold && maximum - threshold >= 1) {
+            score = 100 * (common - threshold) / (maximum - threshold);
+            score = MAX(0, MIN(score, 100));
+        }
+        if (score > best_score) {
+            best_score = score;
+            if (best_score == 100) {
+                break;
+            }
+        }
+    }
+    return best_score;
+}
+
+double compute_e_min(uint32_t blocks_in_bf1, uint32_t blocks_in_bf2)
+{
+    double first = pow(PROBABILITY,
+                       (double)SUBHASHES * (double)blocks_in_bf1);
+    double second = pow(PROBABILITY,
+                        (double)SUBHASHES * (double)blocks_in_bf2);
+    double both = pow(PROBABILITY,
+                      (double)SUBHASHES *
+                          ((double)blocks_in_bf1 + (double)blocks_in_bf2));
+
+    return (double)BLOOMFILTERBITSIZE * (1.0 - first - second + both);
+}
+
+int fingerprint_fprint(FILE *stream, const FINGERPRINT *fp)
+{
+    const BLOOMFILTER *filter;
+    const BLOOMFILTER *last;
+    size_t filter_count;
+    size_t index;
+
+    if (stream == NULL || fp == NULL || fp->bf_list == NULL ||
+        fp->file_name == NULL ||
+        bounded_name_length(fp->file_name) >= FINGERPRINT_NAME_MAX) {
+        return MRSH_ERR_INVALID;
+    }
+
+    filter_count = fingerprint_filter_count(fp);
+    if (filter_count == 0U || filter_count > MAX_FILTER) {
+        return MRSH_ERR_RANGE;
+    }
+    last = fp->bf_list;
+    while (last->next != NULL) {
+        last = last->next;
+    }
+
+    if (fprintf(stream, "%s:%" PRIu64 ":%zu:%" PRIu32 ":",
+                fp->file_name, fp->filesize, filter_count,
+                last->amount_of_blocks) < 0) {
+        return MRSH_ERR_IO;
+    }
+    for (filter = fp->bf_list; filter != NULL; filter = filter->next) {
+        for (index = 0U; index < FILTERSIZE; ++index) {
+            if (fprintf(stream, "%02X", filter->array[index]) < 0) {
+                return MRSH_ERR_IO;
+            }
+        }
+    }
+    if (fputc('\n', stream) == EOF) {
+        return MRSH_ERR_IO;
+    }
+    return MRSH_OK;
+}
+
+int print_fingerprint(const FINGERPRINT *fp)
+{
+    return fingerprint_fprint(stdout, fp);
+}

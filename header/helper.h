@@ -1,18 +1,25 @@
-/* 
- * File:   util.h
- * Author: mustafakarabat
- *
- * Created on 5. Juni 2012, 14:38
- */
-#ifndef HELPER_H
-#define	HELPER_H
+#ifndef MRSH_HELPER_H
+#define MRSH_HELPER_H
+
+#include <stdbool.h>
+#include <dirent.h>
 #include <stdio.h>
-#include <stdint.h>
-#include "../header/config.h"
+#include <sys/stat.h>
 
+#include "config.h"
 
-FILE    *getFileHandle(char *filename);
+bool is_file(const char *path);
+bool is_dir(const char *path);
+int open_regular_file(const char *filename, FILE **handle_out);
+int open_regular_file_checked(const char *filename,
+                              const struct stat *expected,
+                              FILE **handle_out);
+int open_regular_file_follow_checked(const char *filename,
+                                     const struct stat *expected,
+                                     FILE **handle_out);
+int open_directory_checked(const char *filename,
+                           const struct stat *expected,
+                           DIR **directory_out);
+FILE *getFileHandle(const char *filename);
 
-
-#endif	/* HELPER_H */
-
+#endif /* MRSH_HELPER_H */

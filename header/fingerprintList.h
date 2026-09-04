@@ -1,56 +1,48 @@
-/* 
- * File:   bloom.h
- * Author: Frank Breitinger
- *
- * Created on 17. April 2013, 23:34
- */
+#ifndef MRSH_FINGERPRINT_LIST_H
+#define MRSH_FINGERPRINT_LIST_H
 
-#ifndef FINTERPRINTLIST_H
-#define	FINTERPRINTLIST_H
+#include <stddef.h>
+#include <stdio.h>
 
 #include "fingerprint.h"
 
+#ifndef MRSH_FINGERPRINT_LIST_TYPE_DEFINED
+#define MRSH_FINGERPRINT_LIST_TYPE_DEFINED
+typedef struct FINGERPRINT_LIST FINGERPRINT_LIST;
+#endif
 
-
-
-
-typedef struct {
-    //List of fingerprints, created on reading a file having many hashes
+struct FINGERPRINT_LIST {
     FINGERPRINT *list;
     FINGERPRINT *last_element;
-    
-    // size of the list, used while freeing the memory
-    unsigned int size;
-    
-}FINGERPRINT_LIST;
+    size_t size;
+};
 
+typedef struct {
+    char **filename;
+    double *score;
+    size_t length;
+} MATCH_RESULT;
 
-typedef struct{
-    char    **filename;
-    double  *score;
-    long    length;
-}MATCH_RESULT;
+FINGERPRINT_LIST *init_empty_fingerprintList(void);
+FINGERPRINT_LIST *init_fingerprintList_for_ListFile(const char *filename);
+int fingerprintList_destroy(FINGERPRINT_LIST *fpl);
 
+int add_new_fingerprint(FINGERPRINT_LIST *fpl, FINGERPRINT *fp);
 
+/* These calls preflight both candidate and Bloom-filter work budgets and emit
+ * no partial output when either budget would be exceeded. */
+int all_against_all_comparsion(const FINGERPRINT_LIST *fpl);
+int fingerprint_list_comparsion(const FINGERPRINT_LIST *fpl1,
+                                const FINGERPRINT_LIST *fpl2);
+int fingerprint_against_list_comparison(const FINGERPRINT_LIST *fpl,
+                                        const FINGERPRINT *fp);
 
-FINGERPRINT_LIST    *init_empty_fingerprintList();
-FINGERPRINT_LIST 	*init_fingerprintList_for_ListFile(char *filename);
-int                 fingerprintList_destroy(FINGERPRINT_LIST *fpl);
+int print_fingerprintList(const FINGERPRINT_LIST *fpl);
 
-void                add_new_fingerprint(FINGERPRINT_LIST *fpl, FINGERPRINT *fp);
+/* Parse one canonical digest string. The caller owns *out on success. */
+int fingerprint_parse(const char *digest, FINGERPRINT **out);
 
-void                all_against_all_comparsion(FINGERPRINT_LIST *fpl);
-void                fingerprint_list_comparsion(FINGERPRINT_LIST *fpl2, FINGERPRINT_LIST *fpl1);
-void 				fingerprint_against_list_comparison(FINGERPRINT_LIST *fpl, FINGERPRINT *fp);
+/* Parse a list without taking ownership of handle. */
+int read_fingerprint_file(FINGERPRINT_LIST *fpl, FILE *handle);
 
-void                print_fingerprintList(FINGERPRINT_LIST *fpl);
-
-unsigned int        read_fingerprint_file(FINGERPRINT_LIST *bloom_arr, FILE *handle);
-
-
-
-#endif	/* BLOOM_H */
-
-
-
-
+#endif /* MRSH_FINGERPRINT_LIST_H */

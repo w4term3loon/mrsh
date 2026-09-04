@@ -1,0 +1,79 @@
+[build-system]
+requires = ["setuptools>=77", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "mrshw"
+dynamic = ["version"]
+description = "Python bindings for the MRSH-v2 similarity hashing algorithm"
+readme = "bindings/README.md"
+requires-python = ">=3.10"
+license = "Apache-2.0 AND MIT"
+license-files = ["LICENSE.md", "NOTICE.txt", "bindings/LICENSE"]
+authors = [
+  { name = "w4term3loon", email = "ifkovics.barnabas@gmail.com" },
+]
+keywords = [
+  "digital forensics",
+  "malware analysis",
+  "similarity hashing",
+]
+classifiers = [
+  "Development Status :: 4 - Beta",
+  "Intended Audience :: Developers",
+  "Intended Audience :: Information Technology",
+  "Operating System :: POSIX :: Linux",
+  "Programming Language :: C",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3 :: Only",
+  "Programming Language :: Python :: 3.10",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
+  "Programming Language :: Python :: 3.14",
+  "Topic :: Security",
+  "Topic :: Software Development :: Libraries",
+  "Topic :: Utilities",
+]
+
+[project.urls]
+Documentation = "https://github.com/w4term3loon/mrsh/tree/master/bindings"
+Issues = "https://github.com/w4term3loon/mrsh/issues"
+Source = "https://github.com/w4term3loon/mrsh"
+
+[project.scripts]
+mrsh = "mrshw.cli:main"
+
+[project.optional-dependencies]
+test = ["pytest>=8,<10"]
+release = [
+  "build>=1.2,<2",
+  "cibuildwheel>=4,<5",
+  "twine>=6,<8",
+]
+
+[tool.setuptools]
+include-package-data = true
+package-dir = { "" = "bindings" }
+
+[tool.setuptools.dynamic]
+version = { attr = "mrshw._version.__version__" }
+
+[tool.setuptools.packages.find]
+where = ["bindings"]
+include = ["mrshw"]
+
+[tool.pytest.ini_options]
+addopts = "--strict-config --strict-markers -ra"
+testpaths = ["tests"]
+
+[tool.cibuildwheel]
+build = "cp310-* cp311-* cp312-* cp313-* cp314-*"
+build-verbosity = 1
+skip = "*-musllinux_* *-manylinux_i686"
+test-command = "PYTHONPATH={project} python -m pytest {project}/tests"
+test-requires = ["pytest>=8,<10"]
+
+[tool.cibuildwheel.linux]
+manylinux-x86_64-image = "manylinux2014"
+manylinux-aarch64-image = "manylinux2014"

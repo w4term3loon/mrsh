@@ -1,26 +1,21 @@
-/* 
- * File:   hashing.h
- * Author: Frank Breitinger
- *
- * Created on 5. Juni 2012, 13:22
- */
+#ifndef MRSH_HASHING_H
+#define MRSH_HASHING_H
 
-#ifndef HASHING_H
-#define	HASHING_H
-
+#include <stddef.h>
 #include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
+
 #include "config.h"
 #include "fingerprint.h"
-#include "bloomfilter.h"
 
+uint32 roll_hashx(unsigned char c, uchar window[ROLLING_WINDOW],
+                  uint32 rh_data[4]);
+uint32 djb2x(unsigned char c, uchar window[ROLLING_WINDOW], size_t n);
 
+int hashFileToFingerprint(FINGERPRINT *fingerprint, FILE *handle);
+/* Hash a borrowed regular descriptor with pread(); ownership and offset stay
+ * with the caller. */
+int hashFileDescriptorToFingerprint(FINGERPRINT *fingerprint, int descriptor);
+int hashPacketBuffer(FINGERPRINT *fingerprint, const unsigned char *packet,
+                     size_t length);
 
-int         hashFileToFingerprint(FINGERPRINT *fingerprint, FILE *handle);
-uint32      roll_hashx(unsigned char c, uchar window[], uint32 rhData[]);
-uint32      djb2x(unsigned char c, uchar window[], unsigned int n);
-int         hashPacketBuffer(FINGERPRINT *bloom,const unsigned char *packet, const size_t length);
-
-#endif	/* HASHING_H */
-
+#endif /* MRSH_HASHING_H */

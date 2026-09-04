@@ -1,0 +1,17 @@
+include LICENSE.md
+include NOTICE.txt
+include CHANGELOG.md
+include CONTRIBUTING.md
+include SECURITY.md
+include makefile
+include bindings/LICENSE
+include bindings/README.md
+include bindings/docs/api.md
+include pyproject.toml
+include setup.py
+recursive-include tools *.py
+recursive-include bindings/glue *.c *.h
+recursive-include bindings/mrshw *.py
+recursive-include header *.h
+recursive-include src *.c
+recursive-include tests *.py

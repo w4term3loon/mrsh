@@ -1,55 +1,52 @@
-/* 
- * File:   bloom.h
- * Author: Frank Breitinger
- *
- * Created on 17. April 2013, 23:34
- */
+#ifndef MRSH_FINGERPRINT_H
+#define MRSH_FINGERPRINT_H
 
-#ifndef FINTERPRINT_H
-#define	FINTERPRINT_H
+#include <stddef.h>
+#include <stdint.h>
+#include <stdio.h>
 
 #include "bloomfilter.h"
 
+#ifndef MRSH_FINGERPRINT_TYPE_DEFINED
+#define MRSH_FINGERPRINT_TYPE_DEFINED
+typedef struct FINGERPRINT FINGERPRINT;
+#endif
 
-
-
-typedef struct FINGERPRINT {
-	//List of Bloom filters
+struct FINGERPRINT {
     BLOOMFILTER *bf_list;
     BLOOMFILTER *bf_list_last_element;
-    
-    //Pointer to next fingerprint
     struct FINGERPRINT *next;
-    
-   // After storing of MAXBLOCKS blocks are inserted, a new filter is created.
-   // 'amount_of_BF' counts the number of filters we have for a file
-   unsigned int  amount_of_BF;
 
-   // File name and size of the original file
-   char          file_name[200];
-   unsigned int  filesize;
-        
-}FINGERPRINT;
+    /* Number of filters after the first (kept for digest compatibility). */
+    uint32_t amount_of_BF;
 
+    char *file_name;
+    uint64_t filesize;
+};
 
+FINGERPRINT *init_empty_fingerprint(void);
+/* Takes ownership of handle and closes it on every return path. */
+FINGERPRINT *init_fingerprint_for_file(FILE *handle, const char *filename);
+FINGERPRINT *fingerprint_clone(const FINGERPRINT *source);
+int fingerprint_destroy(FINGERPRINT *fp);
 
+int fingerprint_set_name(FINGERPRINT *fp, const char *name);
+int fingerprint_set_name_n(FINGERPRINT *fp, const char *name, size_t length);
+size_t fingerprint_filter_count(const FINGERPRINT *fp);
+/* Return the Bloom-filter pair count, or MRSH_ERR_RANGE when it exceeds the
+ * public per-operation work budget. */
+int fingerprint_comparison_work(const FINGERPRINT *fingerprint1,
+                                const FINGERPRINT *fingerprint2,
+                                uint64_t *work_out);
 
-FINGERPRINT         *init_empty_fingerprint();
-FINGERPRINT         *init_fingerprint_for_file(FILE *handle, char *filename);
-int                 fingerprint_destroy(FINGERPRINT *fp);
+int fingerprint_compare(const FINGERPRINT *fingerprint1,
+                        const FINGERPRINT *fingerprint2);
+int bloom_max_score(const BLOOMFILTER *bf, const FINGERPRINT *fingerprint);
+int add_hash_to_fingerprint(FINGERPRINT *fp, uint64 hash_value);
+int add_new_bloomfilter(FINGERPRINT *fp, BLOOMFILTER *bf);
+double compute_e_min(uint32_t blocks_in_bf1, uint32_t blocks_in_bf2);
 
-int                 fingerprint_compare(FINGERPRINT *fingerprint1, FINGERPRINT *fingerprint2);
-int                 bloom_max_score(BLOOMFILTER *bf, FINGERPRINT *fingerprint);
-void                add_hash_to_fingerprint(FINGERPRINT *fp, uint64 hash_value);
-double              compute_e_min(int blocks_in_bf1, int blocks_in_bf2);
+int fingerprint_fprint(FILE *stream, const FINGERPRINT *fp);
+int print_fingerprint(const FINGERPRINT *fp);
 
-//unsigned int        read_input_hash_file(FINGERPRINT_LIST *fpl,FILE *handle);
-
-void                print_fingerprint(FINGERPRINT *fp);
-
-
-#endif	/* BLOOM_H */
-
-
-
-
+#endif /* MRSH_FINGERPRINT_H */

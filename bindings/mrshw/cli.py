@@ -9,7 +9,17 @@ from . import hash, __version__
 from .utils import scan_directory
 
 
-def main():
+def _threshold(value: str) -> int:
+    try:
+        threshold = int(value)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError("threshold must be an integer") from exc
+    if not 0 <= threshold <= 100:
+        raise argparse.ArgumentTypeError("threshold must be between 0 and 100")
+    return threshold
+
+
+def main() -> int:
     """Main CLI entry point."""
     parser = argparse.ArgumentParser(description="MRSH - Malware Resistant Similarity Hashing")
     parser.add_argument('--version', action='version', version=f'MRSH {__version__}')
@@ -24,15 +34,17 @@ def main():
     compare_parser = subparsers.add_parser('compare', help='Compare two files or hashes')
     compare_parser.add_argument('input1', help='First file or hash')
     compare_parser.add_argument('input2', help='Second file or hash')
-    compare_parser.add_argument('--threshold', '-t', type=int, default=0,
-                               help='Similarity threshold')
+    compare_parser.add_argument(
+        '--threshold', '-t', type=_threshold, default=0,
+        help='Minimum similarity for a successful (exit status 0) comparison',
+    )
 
     # Scan command
     scan_parser = subparsers.add_parser('scan', help='Scan directory for similar files')
     scan_parser.add_argument('directory', help='Directory to scan')
     scan_parser.add_argument('--recursive', '-r', action='store_true',
                             help='Scan recursively')
-    scan_parser.add_argument('--threshold', '-t', type=int, default=50,
+    scan_parser.add_argument('--threshold', '-t', type=_threshold, default=50,
                             help='Similarity threshold')
     scan_parser.add_argument('--extensions', '-e', nargs='*',
                             help='File extensions to include')
@@ -41,7 +53,7 @@ def main():
 
     if not args.command:
         parser.print_help()
-        return
+        return 0
 
     try:
         if args.command == 'hash':
@@ -49,22 +61,28 @@ def main():
             print(result)
 
         elif args.command == 'compare':
-            if Path(args.input1).exists() and Path(args.input2).exists():
+            try:
+                both_files = Path(args.input1).is_file() and Path(args.input2).is_file()
+            except OSError:
+                # Digests are longer than the filename limit on many filesystems.
+                both_files = False
+
+            if both_files:
                 # Compare files
                 from . import Fingerprint
-                fp1 = Fingerprint(args.input1)
-                fp2 = Fingerprint(args.input2)
-                score = fp1.compare(fp2)
+                with Fingerprint(args.input1) as fp1, Fingerprint(args.input2) as fp2:
+                    score = fp1.compare(fp2)
                 print(f"Similarity score: {score}")
             else:
                 # Compare hashes
                 from . import diff
                 score = diff(args.input1, args.input2)
-                print(f"Difference score: {score}")
+                print(f"Similarity score: {score}")
+            return 0 if score >= args.threshold else 1
 
         elif args.command == 'scan':
-            fpl = scan_directory(args.directory, args.extensions, args.recursive)
-            results = fpl.compare_all(args.threshold)
+            with scan_directory(args.directory, args.extensions, args.recursive) as fpl:
+                results = fpl.compare_all(args.threshold)
 
             if results:
                 print("Similar files found:")
@@ -72,11 +90,12 @@ def main():
                     print(f"  {comp.hash1} <-> {comp.hash2} (score: {comp.score})")
             else:
                 print("No similar files found.")
+        return 0
 
     except Exception as e:
         print(f"Error: {e}", file=sys.stderr)
-        sys.exit(1)
+        return 2
 
 
 if __name__ == '__main__':
-    main()
+    raise SystemExit(main())

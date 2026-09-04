@@ -1,43 +1,25 @@
-/* 
- * File:   bloom.h
- * Author: mustafakarabat
- *
- * Created on 17. April 2012, 23:34
- */
+#ifndef MRSH_BLOOMFILTER_H
+#define MRSH_BLOOMFILTER_H
 
-#ifndef BLOOMFILTER_H
-#define	BLOOMFILTER_H
+#include <stdint.h>
 
-/* 
- * We define a struct BLOOM, with all the properties a BLoom-Filter needs.
- */
-typedef struct {
-    // For a filter_size of 256 Bytes.
+#include "config.h"
+
+typedef struct BLOOMFILTER {
     unsigned char array[FILTERSIZE];
-    
-    // We store the number of blocks we add to each filter in count_added_blocks
-    short int amount_of_blocks;
-    
-    // Pointer to next Bloomfilter
+    uint32_t amount_of_blocks;
     struct BLOOMFILTER *next;
-    
-}BLOOMFILTER;
+} BLOOMFILTER;
 
+BLOOMFILTER *init_empty_BF(void);
+void destroy_bf(BLOOMFILTER *bf);
 
+int bloom_set_bit(unsigned char *bit_array, uint16_t value);
+uint16_t count_bits_set_to_one_of_BF(const unsigned char *filter);
+uint16_t bloom_common_bits(const unsigned char *bit_array_one,
+                           const unsigned char *bit_array_two);
 
-BLOOMFILTER     *init_empty_BF();
-void            destroy_bf(BLOOMFILTER *bf);
+int add_hash_to_bloomfilter(BLOOMFILTER *bf, uint64 hash_value);
+int convert_hex_binary(const char *hex_string, BLOOMFILTER *bf);
 
-void            bloom_set_bit(unsigned char *bit_array, unsigned short value);
-unsigned short  count_bits_set_to_one_of_BF(unsigned char *filter);
-unsigned short  bloom_common_bits(unsigned char *bit_array_one, unsigned char *bit_array_two);
-
-void            add_hash_to_bloomfilter(BLOOMFILTER *bf, uint64 hash_value);
-void            convert_hex_binary(const unsigned char *hex_string, BLOOMFILTER *bf);
-
-
-#endif	/* BLOOM_H */
-
-
-
-
+#endif /* MRSH_BLOOMFILTER_H */

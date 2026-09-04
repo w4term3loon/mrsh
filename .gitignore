@@ -3,3 +3,10 @@ compile_commands.json
 bindings/mrshw/libmrsh.so
 bindings/mrshw/__pycache__/
 mrsh
+*.egg-info/
+*.o
+*.py[cod]
+*.so
+.pytest_cache/
+build/
+dist/

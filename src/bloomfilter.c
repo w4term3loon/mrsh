@@ -1,129 +1,136 @@
-/**
- * AUTHOR: Frank Breitinger
- * DATE: April 2013
- * Email: Frank.Breitinger@cased.de
- */
-#include <stdio.h>
-#include <math.h>
-#include <string.h>
-#include <stdint.h>
+#include <stddef.h>
 #include <stdlib.h>
-#include "../header/config.h"
-#include "base64/modp_b64.h"
-#include "../header/hashing.h"
+#include <string.h>
+
 #include "../header/bloomfilter.h"
-#include "../header/util.h"
 
-
-
-//Returns an empty Bloom filter
-BLOOMFILTER *init_empty_BF(){
-	BLOOMFILTER *bf;
-	if (!(bf=(BLOOMFILTER *)calloc(1,sizeof(BLOOMFILTER))))
-	 {
-	     fprintf(stderr,"[*] Error in initializing bloom_read \n");
-	     exit(-1);
-	 }
-	bf->next = NULL;
-	bf->amount_of_blocks = 0;
-	return bf;
-}
-
-
-//Destroy a Bloom filter
-void destroy_bf(BLOOMFILTER *bf) {
-    free(bf->array);
-    free(bf);
-    bf=NULL;
-}
-
-
-
-
-
-/*
- * adds a hash value (eg. FNV) to the Bloom filter
- */
-void add_hash_to_bloomfilter(BLOOMFILTER *bf, uint64 hash_value){
-	unsigned short masked_bits;
-	short byte_pos,bit_pos, one_counter=0;
-
-
-	//add the hash value to the bloom filter
-	for(int j=0;j<SUBHASHES;j++) {
-
-         //masked_bits = ( *(md5_value) >> (SHIFTOPS*j)) & MASK;
-          masked_bits = ( hash_value >> (SHIFTOPS * j)) & MASK;
-          byte_pos = masked_bits >> 3;
-          bit_pos = masked_bits & 0x7;
-
-          if((bf->array[byte_pos]>>bit_pos)&1 == 1)
-        	  one_counter++;
-          bf->array[byte_pos] |= (1<<(bit_pos));
-	}
-	//if all bits were set to one, there is nothing new and we ignore this block
-	//in worst case it is an attack
-	if(one_counter != SUBHASHES)
-		bf->amount_of_blocks++;
-}
-
-
-/*
- * computes the hamming weight (bits set to one) within an integer.
- * one should pass a unsigned char *array
- */
-unsigned short count_bits_set_to_one_of_BF(unsigned char filter[]) {
-    unsigned short  counted_bits=0;
-    int a,v;
-    int *tmp = filter;
-
-    for(a=0;a<FILTERSIZE/4;a++){
-    	v = tmp[a];
-    	v = v - ((v >> 1) & 0x55555555);                //put count of each 2 bits into those 2 bits
-    	v = (v & 0x33333333) + ((v >> 2) & 0x33333333); //put count of each 4 bits into those 4 bits
-    	counted_bits += ((v + (v >> 4) & 0xF0F0F0F) * 0x1010101) >> 24;
-    }
-    return counted_bits;
-}
-
-
-
-
-
-
-
-unsigned short bloom_common_bits(unsigned char bit_array_one[], unsigned char bit_array_two[]) {
-    unsigned char buffer[FILTERSIZE]={0};
-    int a;
-    for(a=0;a<FILTERSIZE;a++)
-        buffer[a] = bit_array_one[a] & bit_array_two[a];
-
-    return count_bits_set_to_one_of_BF(buffer);
-}
-
-
-
-
-
-
-
-/*
- * Convert a hex string to a binary sequence (used for reading in hash lists)
- */
-void convert_hex_binary(const unsigned char *hex_string, BLOOMFILTER *bf)
+static int hex_nibble(char value)
 {
-    unsigned int i=0;
-
-	//WARNING: no sanitization or error-checking whatsoever
-	for(i = 0; i < FILTERSIZE; i++) {
-	  	  sscanf(hex_string, "%2hhx", &bf->array[i]);
-	  	  hex_string += 2 * sizeof(char);
-	}
+    if (value >= '0' && value <= '9') {
+        return value - '0';
+    }
+    if (value >= 'a' && value <= 'f') {
+        return value - 'a' + 10;
+    }
+    if (value >= 'A' && value <= 'F') {
+        return value - 'A' + 10;
+    }
+    return -1;
 }
 
+BLOOMFILTER *init_empty_BF(void)
+{
+    return calloc(1U, sizeof(BLOOMFILTER));
+}
 
+void destroy_bf(BLOOMFILTER *bf)
+{
+    free(bf);
+}
 
+int bloom_set_bit(unsigned char *bit_array, uint16_t value)
+{
+    size_t byte_position;
+    unsigned int bit_position;
 
+    if (bit_array == NULL || value >= BLOOMFILTERBITSIZE) {
+        return MRSH_ERR_INVALID;
+    }
 
+    byte_position = (size_t)value >> 3U;
+    bit_position = (unsigned int)value & 7U;
+    bit_array[byte_position] |= (unsigned char)(1U << bit_position);
+    return MRSH_OK;
+}
 
+int add_hash_to_bloomfilter(BLOOMFILTER *bf, uint64 hash_value)
+{
+    unsigned int already_set = 0U;
+    unsigned int index;
 
+    if (bf == NULL) {
+        return MRSH_ERR_INVALID;
+    }
+
+    for (index = 0U; index < SUBHASHES; ++index) {
+        uint16_t masked_bits =
+            (uint16_t)((hash_value >> (SHIFTOPS * index)) & MASK);
+        size_t byte_position = (size_t)masked_bits >> 3U;
+        unsigned int bit_position = (unsigned int)masked_bits & 7U;
+        unsigned char mask = (unsigned char)(1U << bit_position);
+
+        if ((bf->array[byte_position] & mask) != 0U) {
+            ++already_set;
+        }
+        bf->array[byte_position] |= mask;
+    }
+
+    if (already_set != SUBHASHES) {
+        if (bf->amount_of_blocks == UINT32_MAX) {
+            return MRSH_ERR_RANGE;
+        }
+        ++bf->amount_of_blocks;
+    }
+    return MRSH_OK;
+}
+
+uint16_t count_bits_set_to_one_of_BF(const unsigned char *filter)
+{
+    uint16_t count = 0U;
+    size_t index;
+
+    if (filter == NULL) {
+        return 0U;
+    }
+
+    for (index = 0U; index < FILTERSIZE; ++index) {
+        unsigned int byte = filter[index];
+        while (byte != 0U) {
+            byte &= byte - 1U;
+            ++count;
+        }
+    }
+    return count;
+}
+
+uint16_t bloom_common_bits(const unsigned char *bit_array_one,
+                           const unsigned char *bit_array_two)
+{
+    uint16_t count = 0U;
+    size_t index;
+
+    if (bit_array_one == NULL || bit_array_two == NULL) {
+        return 0U;
+    }
+
+    for (index = 0U; index < FILTERSIZE; ++index) {
+        unsigned int byte = bit_array_one[index] & bit_array_two[index];
+        while (byte != 0U) {
+            byte &= byte - 1U;
+            ++count;
+        }
+    }
+    return count;
+}
+
+int convert_hex_binary(const char *hex_string, BLOOMFILTER *bf)
+{
+    size_t index;
+
+    if (hex_string == NULL || bf == NULL ||
+        strlen(hex_string) != FILTERSIZE * 2U) {
+        return MRSH_ERR_FORMAT;
+    }
+
+    for (index = 0U; index < FILTERSIZE; ++index) {
+        int high = hex_nibble(hex_string[index * 2U]);
+        int low = hex_nibble(hex_string[index * 2U + 1U]);
+        if (high < 0 || low < 0) {
+            memset(bf->array, 0, sizeof(bf->array));
+            return MRSH_ERR_FORMAT;
+        }
+        bf->array[index] = (unsigned char)((unsigned int)high << 4U |
+                                          (unsigned int)low);
+    }
+    return MRSH_OK;
+}

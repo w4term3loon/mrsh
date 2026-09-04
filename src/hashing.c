@@ -1,161 +1,308 @@
+#ifndef _FILE_OFFSET_BITS
+#define _FILE_OFFSET_BITS 64
+#endif
+#ifndef _POSIX_C_SOURCE
+#define _POSIX_C_SOURCE 200809L
+#endif
+
+#include <errno.h>
+#include <stdint.h>
+#include <string.h>
+#include <sys/stat.h>
+#include <sys/types.h>
+#include <unistd.h>
+
 #include "../header/hashing.h"
-#include "../header/config.h"
-#include "../header/util.h"
-#include <stdio.h>
-#include <openssl/md5.h>
+#define FNV64_OFFSET UINT64_C(0xcbf29ce484222325)
+#define FNV64_PRIME  UINT64_C(0x00000100000001b3)
+#define READ_BUFFER_SIZE 65536U
+#define HASH_LOOKAHEAD_SIZE (SKIPPED_BYTES + 1U)
+#define HASH_READ_EOF 1
 
+typedef struct {
+    uchar window[ROLLING_WINDOW];
+    uint32 rolling_data[4];
+    uint64 fnv_hash;
+    uint64_t bytes_seen;
+    size_t skip_remaining;
+#ifdef network
+    bool waiting_for_first_boundary;
+#endif
+} HASH_STATE;
 
+typedef struct {
+    unsigned char buffer[READ_BUFFER_SIZE];
+    size_t position;
+    size_t length;
+    FILE *file;
+    int descriptor;
+    uint64_t descriptor_offset;
+    bool use_descriptor;
+} HASH_READER;
 
-uint32 roll_hashx(unsigned char c, uchar window[], uint32 rhData[])
+uint32 roll_hashx(unsigned char c, uchar window[ROLLING_WINDOW],
+                  uint32 rh_data[4])
 {
-    rhData[2] -= rhData[1];
-    rhData[2] += (ROLLING_WINDOW * c);
+    size_t window_position;
 
-    rhData[1] += c;
-    rhData[1] -= window[rhData[0] % ROLLING_WINDOW];
-
-    window[rhData[0] % ROLLING_WINDOW] = c;
-    rhData[0]++;
-
-    /* The original spamsum AND'ed this value with 0xFFFFFFFF which
-       in theory should have no effect. This AND has been removed 
-       for performance (jk) */
-    rhData[3] = (rhData[3] << 5); //& 0xFFFFFFFF;
-    rhData[3] ^= c;
-
-    return rhData[1] + rhData[2] + rhData[3];
-}
-
-uint32 djb2x(unsigned char c, uchar window[], unsigned int n)
-{
-    unsigned long hash = 5381;
-    int i;
-    unsigned char tmp;
-    window[n % ROLLING_WINDOW] = c;
-
-    for(i=0;i<7;i++)
-    {
-        tmp = window[(n+i) % ROLLING_WINDOW],
-            hash = ((hash << 5) + hash) + tmp;
+    if (window == NULL || rh_data == NULL) {
+        return 0U;
     }
 
+    window_position = rh_data[0] % ROLLING_WINDOW;
+    rh_data[2] -= rh_data[1];
+    rh_data[2] += ROLLING_WINDOW * (uint32)c;
+    rh_data[1] += c;
+    rh_data[1] -= window[window_position];
+    window[window_position] = c;
+    ++rh_data[0];
+    rh_data[3] <<= 5U;
+    rh_data[3] ^= c;
+
+    return rh_data[1] + rh_data[2] + rh_data[3];
+}
+
+uint32 djb2x(unsigned char c, uchar window[ROLLING_WINDOW], size_t n)
+{
+    uint32 hash = 5381U;
+    size_t index;
+
+    if (window == NULL) {
+        return 0U;
+    }
+
+    window[n % ROLLING_WINDOW] = c;
+    for (index = 0U; index < ROLLING_WINDOW; ++index) {
+        unsigned char value = window[(n + index) % ROLLING_WINDOW];
+        hash = ((hash << 5U) + hash) + value;
+    }
     return hash;
 }
 
+static void hash_state_init(HASH_STATE *state)
+{
+    memset(state, 0, sizeof(*state));
+    state->fnv_hash = FNV64_OFFSET;
+#ifdef network
+    state->waiting_for_first_boundary = true;
+#endif
+}
+
+static int hash_state_add_byte(HASH_STATE *state, FINGERPRINT *fingerprint,
+                               unsigned char byte, bool skip_is_available)
+{
+    uint64 rolling_value;
+    int status = MRSH_OK;
+
+    if (state->bytes_seen == UINT64_MAX) {
+        return MRSH_ERR_RANGE;
+    }
+    ++state->bytes_seen;
+    state->fnv_hash ^= byte;
+    state->fnv_hash *= FNV64_PRIME;
+
+    if (state->skip_remaining != 0U) {
+        --state->skip_remaining;
+        return MRSH_OK;
+    }
+
+    rolling_value = roll_hashx(byte, state->window, state->rolling_data);
+    if (rolling_value % BLOCK_SIZE == BLOCK_SIZE - 1U) {
+#ifdef network
+        if (state->waiting_for_first_boundary) {
+            state->waiting_for_first_boundary = false;
+        } else {
+            status = add_hash_to_fingerprint(fingerprint, state->fnv_hash);
+        }
+#else
+        status = add_hash_to_fingerprint(fingerprint, state->fnv_hash);
+#endif
+        if (status != MRSH_OK) {
+            return status;
+        }
+
+        state->fnv_hash = FNV64_OFFSET;
+        if (skip_is_available) {
+            state->skip_remaining = SKIPPED_BYTES;
+        }
+    }
+    return MRSH_OK;
+}
+
+static int hash_state_finish(HASH_STATE *state, FINGERPRINT *fingerprint)
+{
+#ifndef network
+    if (state->bytes_seen != 0U) {
+        return add_hash_to_fingerprint(fingerprint, state->fnv_hash);
+    }
+#else
+    (void)state;
+    (void)fingerprint;
+#endif
+    return MRSH_OK;
+}
+
+static int hash_reader_next(HASH_READER *reader, unsigned char *byte_out)
+{
+    if (reader == NULL || byte_out == NULL) {
+        return MRSH_ERR_INVALID;
+    }
+    if (reader->position == reader->length) {
+        if (reader->use_descriptor) {
+            ssize_t read_result;
+
+            if (reader->descriptor_offset > (uint64_t)INT64_MAX) {
+                return MRSH_ERR_RANGE;
+            }
+            do {
+                read_result = pread(reader->descriptor, reader->buffer,
+                                    sizeof(reader->buffer),
+                                    (off_t)reader->descriptor_offset);
+            } while (read_result < 0 && errno == EINTR);
+            if (read_result < 0) {
+                return MRSH_ERR_IO;
+            }
+            if (read_result == 0) {
+                return HASH_READ_EOF;
+            }
+            reader->length = (size_t)read_result;
+            if (reader->descriptor_offset >
+                UINT64_MAX - (uint64_t)reader->length) {
+                return MRSH_ERR_RANGE;
+            }
+            reader->descriptor_offset += (uint64_t)reader->length;
+        } else {
+            reader->length = fread(reader->buffer, 1U,
+                                   sizeof(reader->buffer), reader->file);
+            if (reader->length == 0U) {
+                return ferror(reader->file) != 0 ? MRSH_ERR_IO : HASH_READ_EOF;
+            }
+        }
+        reader->position = 0U;
+    }
+    *byte_out = reader->buffer[reader->position++];
+    return MRSH_OK;
+}
+
+static int hash_reader_to_fingerprint(FINGERPRINT *fingerprint,
+                                      HASH_READER *reader)
+{
+    unsigned char lookahead[HASH_LOOKAHEAD_SIZE];
+    size_t head = 0U;
+    size_t count = 0U;
+    bool reached_eof = false;
+    HASH_STATE state;
+    int status;
+
+    hash_state_init(&state);
+    while (count < HASH_LOOKAHEAD_SIZE && !reached_eof) {
+        unsigned char byte = 0U;
+        status = hash_reader_next(reader, &byte);
+        if (status == HASH_READ_EOF) {
+            reached_eof = true;
+        } else if (status != MRSH_OK) {
+            return status;
+        } else {
+            lookahead[(head + count) % HASH_LOOKAHEAD_SIZE] = byte;
+            ++count;
+        }
+    }
+
+    while (count != 0U) {
+        unsigned char byte = lookahead[head];
+        bool skip_is_available = count == HASH_LOOKAHEAD_SIZE;
+
+        head = (head + 1U) % HASH_LOOKAHEAD_SIZE;
+        --count;
+        status = hash_state_add_byte(&state, fingerprint, byte,
+                                     skip_is_available);
+        if (status != MRSH_OK) {
+            return status;
+        }
+
+        while (count < HASH_LOOKAHEAD_SIZE && !reached_eof) {
+            status = hash_reader_next(reader, &byte);
+            if (status == HASH_READ_EOF) {
+                reached_eof = true;
+            } else if (status != MRSH_OK) {
+                return status;
+            } else {
+                lookahead[(head + count) % HASH_LOOKAHEAD_SIZE] = byte;
+                ++count;
+            }
+        }
+    }
+
+    status = hash_state_finish(&state, fingerprint);
+    if (status == MRSH_OK) {
+        fingerprint->filesize = state.bytes_seen;
+    }
+    return status;
+}
+
+int hashPacketBuffer(FINGERPRINT *fingerprint, const unsigned char *packet,
+                     size_t length)
+{
+    HASH_STATE state;
+    size_t index;
+    int status;
+
+    if (fingerprint == NULL || (packet == NULL && length != 0U)) {
+        return MRSH_ERR_INVALID;
+    }
+
+    hash_state_init(&state);
+    for (index = 0U; index < length; ++index) {
+        bool skip_is_available =
+            length - index - 1U >= (size_t)SKIPPED_BYTES;
+        status = hash_state_add_byte(&state, fingerprint, packet[index],
+                                     skip_is_available);
+        if (status != MRSH_OK) {
+            return status;
+        }
+    }
+    status = hash_state_finish(&state, fingerprint);
+    if (status == MRSH_OK) {
+        fingerprint->filesize = (uint64_t)length;
+    }
+    return status;
+}
 
 int hashFileToFingerprint(FINGERPRINT *fingerprint, FILE *handle)
 {
-    unsigned long  bytes_read;   //stores the number of characters read from input file
-    unsigned int   i;
-    unsigned char  *byte_buffer     = NULL;
-    unsigned int last_block_index = 0;
-    uint64 rValue, hashvalue=0;
+    HASH_READER reader = {0};
 
-
-    /*we need this arrays for our extended rollhash function*/
-    uchar window[ROLLING_WINDOW] = {0};
-    uint32 rhData[4]             = {0};
-
-
-    if((byte_buffer = (unsigned char*)malloc(sizeof(unsigned char)*fingerprint->filesize))==NULL)
-        return -1;
-
-    // bytes_read stores the number of characters we read from our file
-    fseek(handle,0L, SEEK_SET);	
-    if((bytes_read = fread(byte_buffer,sizeof(unsigned char),fingerprint->filesize,handle))==0)
-        return -1;
-
-    short first = 1;
-
-    for(i=0; i<bytes_read; i++)
-    {
-        /*  
-         * rValue = djb2x(byte_buffer[i],window,i);  
-         */ 
-        rValue  = roll_hashx(byte_buffer[i], window, rhData);  
-
-        if (rValue % BLOCK_SIZE == BLOCK_SIZE-1) // || chunk_index >= BLOCK_SIZE_MAX)
-        {
-
-        	#ifdef network
-        	if (first == 1){
-        		first=0;
-        		last_block_index = i+1;
-        		if(i+SKIPPED_BYTES < bytes_read)
-        		       i += SKIPPED_BYTES;
-        		continue;
-        	}
-			#endif
-
-        	hashvalue = fnv64Bit(byte_buffer, last_block_index, i); //,current_index, FNV1_64_INIT);
-        	add_hash_to_fingerprint(fingerprint, hashvalue); //printf("%i %llu \n", i, hashvalue);
-
-            last_block_index = i+1;
-
-            if(i+SKIPPED_BYTES < bytes_read)
-            	i += SKIPPED_BYTES;
-        }
+    if (fingerprint == NULL || handle == NULL) {
+        return MRSH_ERR_INVALID;
     }
-
-    #ifndef network
-    	hashvalue = fnv64Bit(byte_buffer, last_block_index, bytes_read-1);
-    	add_hash_to_fingerprint(fingerprint, hashvalue);
-	#endif
-
-    free(byte_buffer);
-    return 1;	
+    if (fseek(handle, 0L, SEEK_SET) != 0) {
+        /* Newly opened non-seekable and virtual streams are already at their
+         * beginning. A failed positioning attempt must not prevent streaming. */
+        clearerr(handle);
+    }
+    reader.file = handle;
+    return hash_reader_to_fingerprint(fingerprint, &reader);
 }
 
-int hashPacketBuffer(FINGERPRINT *fingerprint, const unsigned char *packet, const size_t length)
+int hashFileDescriptorToFingerprint(FINGERPRINT *fingerprint, int descriptor)
 {
-    unsigned int i;
-    unsigned int last_block_index = 0;
-    uint64 rValue, hashvalue=0;
-    bool first = 1;
+    struct stat attributes;
+    HASH_READER reader = {0};
+    int stat_result;
 
-    uchar window[ROLLING_WINDOW] = {0};
-    uint32 rhData[4]             = {0};
-
-
-    for(i=0; i<length;i++)
-    {
-        rValue  = roll_hashx(packet[i], window, rhData);  
-
-        if (rValue % BLOCK_SIZE == BLOCK_SIZE-1) 
-        {
-
-			#ifdef network
-        	if (first == 1){
-        		first=0;
-        		last_block_index = i+1;
-        		if(i+SKIPPED_BYTES < length)
-        		       i += SKIPPED_BYTES;
-        		continue;
-        	}
-			#endif
-        		hashvalue = fnv64Bit(packet, last_block_index, i); //,current_index, FNV1_64_INIT);
-        		add_hash_to_fingerprint(fingerprint, hashvalue);
-
-        		last_block_index = i+1;
-
-            if(i+SKIPPED_BYTES < length)
-            	i += SKIPPED_BYTES;
-        }
+    if (fingerprint == NULL || descriptor < 0) {
+        return MRSH_ERR_INVALID;
     }
-
-#ifndef network
-    	hashvalue = fnv64Bit(packet, last_block_index, length-1);
-    	add_hash_to_fingerprint(fingerprint, hashvalue);
-#endif
-
-    return 1;
-}
-
-
-void print_md5value(unsigned char *md5_value)
-{
-    int i;
-    for(i=0;i<MD5_DIGEST_LENGTH;i++)
-        printf("%02x",md5_value[i]);
-    puts("");
+    do {
+        stat_result = fstat(descriptor, &attributes);
+    } while (stat_result != 0 && errno == EINTR);
+    if (stat_result != 0) {
+        return MRSH_ERR_IO;
+    }
+    if (!S_ISREG(attributes.st_mode) || attributes.st_size < (off_t)0) {
+        return MRSH_ERR_INVALID;
+    }
+    reader.descriptor = descriptor;
+    reader.use_descriptor = true;
+    return hash_reader_to_fingerprint(fingerprint, &reader);
 }

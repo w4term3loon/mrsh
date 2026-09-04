@@ -1,0 +1,109 @@
+name: CI
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  native-cli:
+    name: Standalone CLI under sanitizers
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.14"
+      - name: Build with strict warnings and sanitizers
+        run: make sanitize
+      - name: Exercise digest output and native list parsing
+        env:
+          ASAN_OPTIONS: detect_leaks=1:halt_on_error=1:strict_string_checks=1
+          UBSAN_OPTIONS: halt_on_error=1:print_stacktrace=1
+          MRSH_NATIVE_CLI: ${{ github.workspace }}/mrsh
+        run: |
+          python -m pip install --upgrade "pytest>=8,<10"
+          python -m pytest tests/test_native_cli.py
+
+  tests:
+    name: Python ${{ matrix.python-version }}
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.10", "3.12", "3.14"]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+      - name: Install from the repository root
+        run: python -m pip install --upgrade ".[test]"
+      - name: Test
+        run: python -m pytest
+
+  sanitizers:
+    name: Address and undefined-behavior sanitizers
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.14"
+      - name: Build an instrumented native library
+        env:
+          CFLAGS: >-
+            -O1 -g3 -Wall -Wextra -Wpedantic -Werror
+            -fsanitize=address,undefined -fno-omit-frame-pointer
+          LDFLAGS: -fsanitize=address,undefined
+        run: |
+          python -m pip install --upgrade pip setuptools wheel
+          python -m pip install --upgrade --no-build-isolation ".[test]"
+      - name: Run regression tests under the sanitizers
+        env:
+          ASAN_OPTIONS: detect_leaks=0:halt_on_error=1:strict_string_checks=1
+          UBSAN_OPTIONS: halt_on_error=1:print_stacktrace=1
+          PYTHONMALLOC: malloc
+        run: |
+          export LD_PRELOAD="$(gcc -print-file-name=libasan.so)"
+          python -m pytest
+
+  distribution:
+    name: Distribution integrity
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.14"
+      - name: Build wheel and source archive
+        run: |
+          python -m pip install --upgrade "build>=1.2,<2" "twine>=6,<8"
+          python -m build
+          python -m twine check dist/*
+      - name: Verify wheel and source archive contents
+        run: python tools/check_dist.py dist
+      - name: Rebuild a wheel from the source archive
+        run: |
+          mkdir wheel-from-sdist
+          python -m pip wheel --no-deps --wheel-dir wheel-from-sdist dist/*.tar.gz
+          python -m twine check wheel-from-sdist/*
+          python tools/check_dist.py wheel-from-sdist
+      - name: Test the wheel rebuilt from the source archive
+        run: |
+          python -m pip install --force-reinstall "pytest>=8,<10" wheel-from-sdist/*.whl
+          cd "$RUNNER_TEMP"
+          PYTHONPATH="$GITHUB_WORKSPACE" python -m pytest "$GITHUB_WORKSPACE/tests"

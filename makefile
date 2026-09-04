@@ -1,29 +1,44 @@
-NAME=mrsh
-SOURCE=src/util.c src/hashing.c src/bloomfilter.c src/fingerprint.c src/fingerprintList.c src/helper.c
-HEADER=header/util.h header/hashing.h header/bloomfilter.h header/fingerprint.h header/fingerprintList.h header/helper.h
+CC ?= cc
+CPPFLAGS ?=
+CFLAGS ?= -std=c99 -O2 -Wall -Wextra -Wpedantic -Wmissing-prototypes
+LDFLAGS ?=
+LDLIBS ?=
 
-CMD_TARGET=src/main.c
+MRSH_CPPFLAGS := -Iheader -D_DEFAULT_SOURCE
+MRSH_LDLIBS := -lm
+ifeq ($(shell uname -s),Linux)
+MRSH_SHARED_LDFLAGS := -Wl,-Bsymbolic-functions
+endif
 
-LIB_NAME=bindings/mrshw/libmrsh.so
-LIB_WRAPPER=bindings/glue/mrsh_glue.c
+NAME := mrsh
+SOURCES := src/util.c src/hashing.c src/bloomfilter.c src/fingerprint.c src/fingerprintList.c src/helper.c src/traversal.c
+HEADERS := $(wildcard header/*.h)
+CLI_SOURCE := src/main.c
+LIBRARY := bindings/mrshw/libmrsh.so
+GLUE_SOURCE := bindings/glue/mrsh_glue.c
+GLUE_HEADER := bindings/glue/mrsh_glue.h
 
-all: debug
+.PHONY: all debug lib net sanitize clean
 
-mrsh: ${SOURCE} ${HEADER} ${CMD_TARGET}
-	gcc -w -std=c99 -O3 -D_BSD_SOURCE -lcrypto -o ${NAME} ${CMD_TARGET} ${SOURCE} -lm
+all: $(NAME)
 
-debug: ${SOURCE} ${HEADER} ${CMD_TARGET}
-	gcc -w -ggdb -std=c99 -O0 -D_BSD_SOURCE -lcrypto -o ${NAME} ${CMD_TARGET} ${SOURCE} -lm
+$(NAME): $(SOURCES) $(HEADERS) $(CLI_SOURCE)
+	$(CC) $(CPPFLAGS) $(MRSH_CPPFLAGS) $(CFLAGS) $(LDFLAGS) -o $@ $(CLI_SOURCE) $(SOURCES) $(LDLIBS) $(MRSH_LDLIBS)
 
-net: ${SOURCE} ${HEADER} ${CMD_TARGET}
-	gcc -w -std=c99 -O3 -D_BSD_SOURCE -lcrypto -o ${NAME} ${CMD_TARGET} ${SOURCE} -Dnetwork -lm
+debug:
+	$(MAKE) -B CFLAGS="-std=c99 -O0 -g3 -Wall -Wextra -Wpedantic -Wmissing-prototypes" $(NAME)
 
-lib: ${SOURCE} ${HEADER}
-	gcc -w -Iheader -std=c99 -O3 -fPIC -shared -D_BSD_SOURCE -fvisibility=default -lcrypto -o ${LIB_NAME} ${SOURCE} ${LIB_WRAPPER} -lm
+net:
+	$(MAKE) -B CPPFLAGS="$(CPPFLAGS) -Dnetwork" $(NAME)
+
+lib: $(LIBRARY)
+
+$(LIBRARY): $(SOURCES) $(HEADERS) $(GLUE_SOURCE) $(GLUE_HEADER)
+	$(CC) $(CPPFLAGS) $(MRSH_CPPFLAGS) $(CFLAGS) -fPIC -fvisibility=hidden -shared $(LDFLAGS) $(MRSH_SHARED_LDFLAGS) -o $@ $(SOURCES) $(GLUE_SOURCE) $(LDLIBS) $(MRSH_LDLIBS)
+
+sanitize:
+	$(MAKE) clean
+	$(MAKE) CFLAGS="-std=c99 -O1 -g3 -Wall -Wextra -Wpedantic -Wmissing-prototypes -Werror -fsanitize=address,undefined -fno-omit-frame-pointer" LDFLAGS="-fsanitize=address,undefined" $(NAME)
 
 clean:
-	rm -f ${NAME} *.o ${LIB_NAME}
-
-# for DT_DIR feature to work, need to have the _BSD_SOURCE  feature test macro defined. These are not standard, and GCC does not define the macro when compiling for C99.
-
-
+	rm -f -- $(NAME) $(LIBRARY)
